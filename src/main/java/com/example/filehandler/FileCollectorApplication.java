@@ -7,10 +7,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.List;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import com.example.filehandler.config.AppConfig;
 import com.example.filehandler.factory.FileWriterStrategyFactory;
 import com.example.filehandler.reader.FileReader;
@@ -24,14 +22,13 @@ public class FileCollectorApplication {
     private static final Logger logger = LoggerFactory.getLogger(FileCollectorApplication.class);
 
     public static void main(String[] args) {
-        AppConfig config = loadConfiguration(args);
+        AppConfig config = loadConfiguration();
         Path outputPath = Paths.get(config.getOutputFilePath());
 
         try {
             prepareOutputFile(outputPath);
 
-            FileReader fileReader = new FileReaderImpl()
-                    .withOutputFile(outputPath)
+            FileReader fileReader = new FileReaderImpl().withOutputFile(outputPath)
                     .withIgnoreFolders(config.getIgnoreFolders());
 
             processFiles(fileReader, config);
@@ -49,7 +46,7 @@ public class FileCollectorApplication {
      * @param args command-line arguments
      * @return application configuration
      */
-    private static AppConfig loadConfiguration(String[] args) {
+    private static AppConfig loadConfiguration() {
         // In a real application, this would load from a config file or command line
         // args
         AppConfig config = new AppConfig();
@@ -84,7 +81,7 @@ public class FileCollectorApplication {
      * Processes files using the configured file reader and strategies.
      *
      * @param fileReader the file reader to use
-     * @param config     the application configuration
+     * @param config the application configuration
      */
     private static void processFiles(FileReader fileReader, AppConfig config) {
         List<String> folderPaths = config.getFolderPaths();
