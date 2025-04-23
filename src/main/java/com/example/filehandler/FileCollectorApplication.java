@@ -7,8 +7,10 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.List;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import com.example.filehandler.config.AppConfig;
 import com.example.filehandler.factory.FileWriterStrategyFactory;
 import com.example.filehandler.reader.FileReader;
@@ -22,19 +24,19 @@ public class FileCollectorApplication {
     private static final Logger logger = LoggerFactory.getLogger(FileCollectorApplication.class);
 
     public static void main(String[] args) {
-        AppConfig config = loadConfiguration();
-        Path outputPath = Paths.get(config.getOutputFilePath());
+        final AppConfig config = loadConfiguration();
+        final Path outputPath = Paths.get(config.getOutputFilePath());
 
         try {
             prepareOutputFile(outputPath);
 
-            FileReader fileReader = new FileReaderImpl().withOutputFile(outputPath)
+            final FileReader fileReader = new FileReaderImpl().withOutputFile(outputPath)
                     .withIgnoreFolders(config.getIgnoreFolders());
 
             processFiles(fileReader, config);
 
             logger.info("File contents written to {}", outputPath.normalize().toAbsolutePath());
-        } catch (Exception e) {
+        } catch (final Exception e) {
             logger.error("Error processing files: {}", e.getMessage(), e);
             System.exit(1);
         }
@@ -43,13 +45,12 @@ public class FileCollectorApplication {
     /**
      * Loads application configuration from command-line args or defaults.
      *
-     * @param args command-line arguments
      * @return application configuration
      */
     private static AppConfig loadConfiguration() {
         // In a real application, this would load from a config file or command line
         // args
-        AppConfig config = new AppConfig();
+        final AppConfig config = new AppConfig();
 
         config.setOutputFilePath("./output.txt");
 
@@ -58,11 +59,13 @@ public class FileCollectorApplication {
                 "C:\\Users\\ntgpt\\OneDrive\\workspace\\job-scheduling-system-ui\\src\\types\\jobs1"));
 
         config.setFolderPaths(Arrays.asList(
-                // "C:\\Users\\n" + //
-                // "tgpt\\OneDrive\\workspace\\qlz_flash_cards_ui\\lib\\features\\flashcard\\presentation",
-                "C:\\Users\\n" + //
-                        "tgpt\\OneDrive\\workspace\\Kardio\\app\\src\\main\\res\\n" + //
-                        "avigation"));
+                "D:\\workspace\\spaced_learning_app\\lib\\core\\services\\platform",
+                "D:\\workspace\\spaced_learning_app\\lib\\core\\services\\reminder",
+                "D:\\workspace\\spaced_learning_app\\lib\\core\\di\\service_locator.dart",
+                "D:\\workspace\\spaced_learning_app\\lib\\presentation\\screens\\settings\\reminder_settings_screen.dart",
+                "D:\\workspace\\spaced_learning_app\\lib\\presentation\\viewmodels\\progress_viewmodel.dart",
+                "D:\\workspace\\spaced_learning_app\\lib\\presentation\\viewmodels\\reminder_settings_viewmodel.dart",
+                "D:\\workspace\\spaced_learning_app\\lib\\core\\events\\app_events.dart"));
 
         return config;
     }
@@ -81,17 +84,17 @@ public class FileCollectorApplication {
      * Processes files using the configured file reader and strategies.
      *
      * @param fileReader the file reader to use
-     * @param config the application configuration
+     * @param config     the application configuration
      */
     private static void processFiles(FileReader fileReader, AppConfig config) {
-        List<String> folderPaths = config.getFolderPaths();
-        FileWriterStrategyFactory strategyFactory = new FileWriterStrategyFactory(folderPaths);
+        final List<String> folderPaths = config.getFolderPaths();
+        final FileWriterStrategyFactory strategyFactory = new FileWriterStrategyFactory(folderPaths);
 
         try {
             // Process all registered file types
-            for (String fileType : config.getRegisteredFileTypes()) {
-                List<String> extensions = config.getFileExtensions(fileType);
-                FileWriterStrategy strategy = strategyFactory.createStrategy(fileType);
+            for (final String fileType : config.getRegisteredFileTypes()) {
+                final List<String> extensions = config.getFileExtensions(fileType);
+                final FileWriterStrategy strategy = strategyFactory.createStrategy(fileType);
 
                 if (strategy != null) {
                     logger.info("Processing {} files with extensions: {}", fileType, extensions);
@@ -100,7 +103,7 @@ public class FileCollectorApplication {
                     logger.warn("No strategy found for file type: {}", fileType);
                 }
             }
-        } catch (IOException e) {
+        } catch (final IOException e) {
             logger.error("Error reading and writing files: {}", e.getMessage(), e);
         }
     }
