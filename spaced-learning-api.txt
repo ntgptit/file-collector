@@ -1,0 +1,4989 @@
+// src/main/java/com/spacedlearning/exception/GlobalExceptionHandler.java
+/**
+ * Global exception handler for the application. Centralizes exception handling
+ * for all controllers.
+ */
+@RestControllerAdvice
+@Slf4j
+@RequiredArgsConstructor
+public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
+	private final MessageSource messageSource;
+	/**
+	 * Extract path from WebRequest
+	 *
+	 * @param request WebRequest
+	 * @return Path string
+	 */
+	private String extractPath(final WebRequest request) {
+		return request.getDescription(false).replace("uri=", "");
+	}
+	/**
+     * Handle access denied exceptions
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiError> handleAccessDeniedException(final AccessDeniedException ex, final WebRequest request) {
+        log.error("Access denied: {}", ex.getMessage());
+        final String message = messageSource.getMessage(
+                "error.auth.accessDenied",
+                null,
+                "Access denied: insufficient permissions",
+                LocaleContextHolder.getLocale());
+        final ApiError apiError = ApiError.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.FORBIDDEN.value())
+                .error(HttpStatus.FORBIDDEN.getReasonPhrase())
+                .message(message)
+                .path(extractPath(request))
+                .build();
+        return new ResponseEntity<>(apiError, HttpStatus.FORBIDDEN);
+    }
+	/**
+     * Fallback for all other exceptions
+     */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiError> handleAll(final Exception ex, final WebRequest request) {
+        log.error("Unhandled exception", ex);
+        final String message = messageSource.getMessage(
+                "error.server.internal",
+                null,
+                "An unexpected error occurred",
+                LocaleContextHolder.getLocale());
+        final ApiError apiError = ApiError.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
+                .error(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase())
+                .message(message)
+                .path(extractPath(request))
+                .build();
+        return new ResponseEntity<>(apiError, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+	/**
+     * Handle authentication exceptions
+     */
+    @ExceptionHandler({ AuthenticationException.class, BadCredentialsException.class })
+    public ResponseEntity<ApiError> handleAuthenticationException(final Exception ex, final WebRequest request) {
+        log.error("Authentication error: {}", ex.getMessage());
+        final String message = messageSource.getMessage(
+                "error.auth.invalidCredentials",
+                null,
+                "Authentication failed: " + ex.getMessage(),
+                LocaleContextHolder.getLocale());
+        final ApiError apiError = ApiError.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.UNAUTHORIZED.value())
+                .error(HttpStatus.UNAUTHORIZED.getReasonPhrase())
+                .message(message)
+                .path(extractPath(request))
+                .build();
+        return new ResponseEntity<>(apiError, HttpStatus.UNAUTHORIZED);
+    }
+	/**
+     * Handle constraint violation exceptions (validation errors)
+     */
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<ApiError> handleConstraintViolationException(
+            final ConstraintViolationException ex,
+            final WebRequest request) {
+        log.error("Constraint violation: {}", ex.getMessage());
+        final Map<String, String> errors = ex.getConstraintViolations().stream()
+                .collect(Collectors.toMap(
+                        violation -> violation.getPropertyPath().toString(),
+                        ConstraintViolation::getMessage,
+                        (error1, error2) -> error1 + "; " + error2));
+        final String message = messageSource.getMessage(
+                "error.validation.general",
+                null,
+                "Validation failed",
+                LocaleContextHolder.getLocale());
+        final ApiError apiError = ApiError.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.BAD_REQUEST.value())
+                .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
+                .message(message)
+                .path(extractPath(request))
+                .errors(errors)
+                .build();
+        return new ResponseEntity<>(apiError, HttpStatus.BAD_REQUEST);
+    }
+	/**
+     * Handle data integrity violations (e.g., unique constraint violations)
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiError> handleDataIntegrityViolationException(
+            final DataIntegrityViolationException ex,
+            final WebRequest request) {
+        log.error("Data integrity violation: {}", ex.getMessage());
+        final String message = messageSource.getMessage(
+                "error.database.constraint",
+                null,
+                "Database constraint violation",
+                LocaleContextHolder.getLocale());
+        final ApiError apiError = ApiError.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.CONFLICT.value())
+                .error(HttpStatus.CONFLICT.getReasonPhrase())
+                .message(message)
+                .path(extractPath(request))
+                .build();
+        return new ResponseEntity<>(apiError, HttpStatus.CONFLICT);
+    }
+	/**
+     * Handle entity not found exceptions
+     */
+    @ExceptionHandler(EntityNotFoundException.class)
+    public ResponseEntity<ApiError> handleEntityNotFoundException(
+            final EntityNotFoundException ex,
+            final WebRequest request) {
+        log.error("Entity not found: {}", ex.getMessage());
+        final ApiError apiError = ApiError.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.NOT_FOUND.value())
+                .error(HttpStatus.NOT_FOUND.getReasonPhrase())
+                .message(ex.getMessage())
+                .path(extractPath(request))
+                .build();
+        return new ResponseEntity<>(apiError, HttpStatus.NOT_FOUND);
+    }
+	/**
+     * Handle validation exceptions from @Valid
+     */
+    @Override
+    protected ResponseEntity<Object> handleMethodArgumentNotValid(
+            @NonNull final MethodArgumentNotValidException ex,
+            @NonNull final HttpHeaders headers,
+            @NonNull final HttpStatusCode status,
+            @NonNull final WebRequest request) {
+        log.error("Validation error: {}", ex.getMessage());
+        final Map<String, String> errors = ex.getBindingResult().getFieldErrors().stream()
+                .collect(Collectors.toMap(
+                        FieldError::getField,
+                        fieldError -> fieldError.getDefaultMessage() == null ?
+                                "Invalid value" : fieldError.getDefaultMessage(),
+                        (error1, error2) -> error1 + "; " + error2));
+        final String message = messageSource.getMessage(
+                "error.validation.general",
+                null,
+                "Validation failed",
+                LocaleContextHolder.getLocale());
+        final ApiError apiError = ApiError.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.BAD_REQUEST.value())
+                .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
+                .message(message)
+                .path(extractPath(request))
+                .errors(errors)
+                .build();
+        return new ResponseEntity<>(apiError, HttpStatus.BAD_REQUEST);
+    }
+	/**
+     * Handle method argument type mismatch
+     */
+	@SuppressWarnings("null")
+	@ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiError> handleMethodArgumentTypeMismatch(
+            final MethodArgumentTypeMismatchException ex,
+            final WebRequest request) {
+        log.error("Type mismatch: {}", ex.getMessage());
+        final Map<String, String> errors = new HashMap<>();
+        final String requiredType = ex.getRequiredType() != null ?
+                ex.getRequiredType().getSimpleName() : "unknown";
+        errors.put(ex.getName(), "Should be of type " + requiredType);
+        final String message = messageSource.getMessage(
+                "error.validation.typeMismatch",
+                new Object[]{ex.getName(), requiredType},
+                "Type mismatch for parameter",
+                LocaleContextHolder.getLocale());
+        final ApiError apiError = ApiError.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.BAD_REQUEST.value())
+                .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
+                .message(message)
+                .path(extractPath(request))
+                .errors(errors)
+                .build();
+        return new ResponseEntity<>(apiError, HttpStatus.BAD_REQUEST);
+    }
+	/**
+     * Handle missing request parameters
+     */
+    @Override
+    protected ResponseEntity<Object> handleMissingServletRequestParameter(
+            @NonNull final MissingServletRequestParameterException ex,
+            @NonNull final HttpHeaders headers,
+            @NonNull final HttpStatusCode status,
+            @NonNull final WebRequest request) {
+        log.error("Missing parameter: {}", ex.getMessage());
+        final Map<String, String> errors = new HashMap<>();
+        errors.put(ex.getParameterName(), "Parameter is missing");
+        final String message = messageSource.getMessage(
+                "error.validation.missingParameter",
+                new Object[]{ex.getParameterName()},
+                "Required request parameter is missing",
+                LocaleContextHolder.getLocale());
+        final ApiError apiError = ApiError.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.BAD_REQUEST.value())
+                .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
+                .message(message)
+                .path(extractPath(request))
+                .errors(errors)
+                .build();
+        return new ResponseEntity<>(apiError, HttpStatus.BAD_REQUEST);
+    }
+	/**
+     * Handle custom SpacedLearning exceptions
+     */
+    @ExceptionHandler(SpacedLearningException.class)
+    public ResponseEntity<ApiError> handleSpacedLearningException(
+            final SpacedLearningException ex,
+            final WebRequest request) {
+        log.error("Business exception: {}", ex.getMessage());
+        final ApiError apiError = ApiError.builder()
+                .timestamp(LocalDateTime.now())
+                .status(ex.getStatus().value())
+                .error(ex.getStatus().getReasonPhrase())
+                .message(ex.getMessage())
+                .path(extractPath(request))
+                .build();
+        return new ResponseEntity<>(apiError, ex.getStatus());
+    }
+}
+
+// src/main/java/com/spacedlearning/service/impl/RepetitionServiceImpl.java
+/**
+ * Implementation of RepetitionService
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class RepetitionServiceImpl implements RepetitionService {
+	private static final int[] REPETITION_INTERVALS = { 1, 2, 3, 5, 8 };
+	private final RepetitionRepository repetitionRepository;
+	private final ModuleProgressRepository progressRepository;
+	private final RepetitionMapper repetitionMapper;
+	@Override
+	@Transactional
+	public RepetitionResponse create(RepetitionCreateRequest request) {
+		log.debug("Creating new repetition: {}", request);
+		final ModuleProgress progress = progressRepository.findById(request.getModuleProgressId()).orElseThrow(
+				() -> SpacedLearningException.resourceNotFound("ModuleProgress", request.getModuleProgressId()));
+		if (repetitionRepository.existsByModuleProgressIdAndRepetitionOrder(request.getModuleProgressId(),
+				request.getRepetitionOrder())) {
+			throw SpacedLearningException.resourceAlreadyExists("Repetition", "module_progress_id and repetition_order",
+					request.getModuleProgressId() + ", " + request.getRepetitionOrder());
+		}
+		final Repetition repetition = repetitionMapper.toEntity(request, progress);
+		final Repetition savedRepetition = repetitionRepository.save(repetition);
+		log.info("Repetition created successfully with ID: {}", savedRepetition.getId());
+		return repetitionMapper.toDto(savedRepetition);
+	}
+	@Override
+	@Transactional
+	public List<RepetitionResponse> createDefaultSchedule(UUID moduleProgressId) {
+		log.debug("Creating default repetition schedule for module progress ID: {}", moduleProgressId);
+		final ModuleProgress progress = progressRepository.findById(moduleProgressId)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound("ModuleProgress", moduleProgressId));
+		final List<Repetition> existingRepetitions = repetitionRepository
+				.findByModuleProgressIdOrderByRepetitionOrder(moduleProgressId);
+		if (!existingRepetitions.isEmpty()) {
+			log.info("Repetition schedule already exists for module progress ID: {}", moduleProgressId);
+			return repetitionMapper.toDtoList(existingRepetitions);
+		}
+		LocalDate referenceDate = progress.getFirstLearningDate();
+		if (referenceDate == null) {
+			referenceDate = LocalDate.now();
+			progress.setFirstLearningDate(referenceDate);
+			progressRepository.save(progress);
+		}
+		final List<Repetition> repetitions = new ArrayList<>();
+		final RepetitionOrder[] orders = RepetitionOrder.values();
+		for (int i = 0; i < orders.length && i < REPETITION_INTERVALS.length; i++) {
+			final RepetitionOrder order = orders[i];
+			final int intervalDays = REPETITION_INTERVALS[i];
+			final LocalDate reviewDate = referenceDate.plus(intervalDays, ChronoUnit.DAYS);
+			final Repetition repetition = new Repetition();
+			repetition.setModuleProgress(progress);
+			repetition.setRepetitionOrder(order);
+			repetition.setStatus(RepetitionStatus.NOT_STARTED);
+			repetition.setReviewDate(reviewDate);
+			repetitions.add(repetition);
+		}
+		final List<Repetition> savedRepetitions = repetitionRepository.saveAll(repetitions);
+		log.info("Created default repetition schedule with {} repetitions for module progress ID: {}",
+				savedRepetitions.size(), moduleProgressId);
+		return repetitionMapper.toDtoList(savedRepetitions);
+	}
+	@Override
+	@Transactional
+	public void delete(UUID id) {
+		log.debug("Deleting repetition with ID: {}", id);
+		final Repetition repetition = repetitionRepository.findById(id)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound("Repetition", id));
+		repetition.softDelete(); // Use soft delete
+		repetitionRepository.save(repetition);
+		log.info("Repetition soft deleted successfully with ID: {}", id);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public Page<RepetitionResponse> findAll(Pageable pageable) {
+		log.debug("Finding all repetitions with pagination: {}", pageable);
+		return repetitionRepository.findAll(pageable).map(repetitionMapper::toDto);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public RepetitionResponse findById(UUID id) {
+		log.debug("Finding repetition by ID: {}", id);
+		final Repetition repetition = repetitionRepository.findById(id)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound("Repetition", id));
+		return repetitionMapper.toDto(repetition);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public List<RepetitionResponse> findByModuleProgressId(UUID moduleProgressId) {
+		log.debug("Finding repetitions by module progress ID: {}", moduleProgressId);
+		if (!progressRepository.existsById(moduleProgressId)) {
+			throw SpacedLearningException.resourceNotFound("ModuleProgress", moduleProgressId);
+		}
+		final List<Repetition> repetitions = repetitionRepository
+				.findByModuleProgressIdOrderByRepetitionOrder(moduleProgressId);
+		return repetitionMapper.toDtoList(repetitions);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public RepetitionResponse findByModuleProgressIdAndOrder(UUID moduleProgressId, RepetitionOrder repetitionOrder) {
+		log.debug("Finding repetition by module progress ID: {} and order: {}", moduleProgressId, repetitionOrder);
+		final Repetition repetition = repetitionRepository
+				.findByModuleProgressIdAndRepetitionOrder(moduleProgressId, repetitionOrder)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound(
+						"Repetition for ModuleProgress " + moduleProgressId + " and Order " + repetitionOrder, null));
+		return repetitionMapper.toDto(repetition);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public Page<RepetitionResponse> findDueRepetitions(UUID userId, LocalDate reviewDate, RepetitionStatus status,
+			Pageable pageable) {
+		log.debug("Finding repetitions due for review for user ID: {} on or before date: {}, status: {}, pageable: {}",
+				userId, reviewDate, status, pageable);
+		final LocalDate dateToCheck = reviewDate != null ? reviewDate : LocalDate.now();
+		final RepetitionStatus statusToCheck = status != null ? status : RepetitionStatus.NOT_STARTED;
+		return repetitionRepository.findDueRepetitions(userId, dateToCheck, statusToCheck, pageable)
+				.map(repetitionMapper::toDto);
+	}
+	@Override
+	@Transactional
+	public RepetitionResponse update(UUID id, RepetitionUpdateRequest request) {
+		log.debug("Updating repetition with ID: {}, request: {}", id, request);
+		final Repetition repetition = repetitionRepository.findById(id)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound("Repetition", id));
+		repetitionMapper.updateFromDto(request, repetition);
+		final Repetition updatedRepetition = repetitionRepository.save(repetition);
+		log.info("Repetition updated successfully with ID: {}", updatedRepetition.getId());
+		return repetitionMapper.toDto(updatedRepetition);
+	}
+}
+
+// src/main/java/com/spacedlearning/security/JwtTokenProvider.java
+/**
+ * Provider for JWT token operations. Handles token generation, validation, and
+ * parsing.
+ */
+@Component
+@Slf4j
+public class JwtTokenProvider {
+    @Value("${jwt.secret}")
+    private String jwtSecret;
+    @Value("${jwt.expiration}")
+    private long jwtExpiration;
+    @Value("${jwt.refresh.expiration:604800000}") // Default 7 days
+    private long refreshTokenExpiration;
+    @Value("${jwt.issuer:kardio-api}")
+    private String jwtIssuer;
+    private static final String AUTHORITIES_KEY = "roles";
+    private static final String TOKEN_TYPE_KEY = "type";
+    private static final String TOKEN_TYPE_ACCESS = "access";
+    private static final String TOKEN_TYPE_REFRESH = "refresh";
+    private static final String TOKEN_ID_KEY = "jti";
+    private static final SecureRandom secureRandom = new SecureRandom();
+    /**
+     * Generates a JWT token for the given user details.
+     *
+     * @param userDetails The user details
+     * @return A JWT token
+     */
+    public String generateToken(UserDetails userDetails) {
+        return generateToken(new HashMap<>(), userDetails);
+    }
+    /**
+     * Generates a JWT token for the given authentication.
+     *
+     * @param authentication The authentication object
+     * @return A JWT token
+     */
+    public String generateToken(Authentication authentication) {
+        final UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+        final String authorities = authentication
+            .getAuthorities()
+            .stream()
+            .map(GrantedAuthority::getAuthority)
+            .collect(Collectors.joining(","));
+        final Map<String, Object> claims = new HashMap<>();
+        claims.put(AUTHORITIES_KEY, authorities);
+        claims.put(TOKEN_TYPE_KEY, TOKEN_TYPE_ACCESS);
+        claims.put(TOKEN_ID_KEY, generateTokenId());
+        return generateToken(claims, userDetails);
+    }
+    /**
+     * Generates a refresh token for the given authentication.
+     *
+     * @param authentication The authentication object
+     * @return A refresh token
+     */
+    public String generateRefreshToken(Authentication authentication) {
+        final UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+        final Map<String, Object> claims = new HashMap<>();
+        claims.put(TOKEN_TYPE_KEY, TOKEN_TYPE_REFRESH);
+        claims.put(TOKEN_ID_KEY, generateTokenId());
+        return generateRefreshToken(claims, userDetails);
+    }
+    /**
+     * Generates a JWT token with custom claims for the given user details.
+     *
+     * @param extraClaims Additional claims to include in the token
+     * @param userDetails The user details
+     * @return A JWT token
+     */
+    public String generateToken(Map<String, Object> extraClaims, UserDetails userDetails) {
+        final Date now = new Date();
+        final Date expiryDate = new Date(now.getTime() + jwtExpiration);
+        log.debug("Generating JWT access token for user: {}", userDetails.getUsername());
+        return Jwts
+            .builder()
+            .setClaims(extraClaims)
+            .setSubject(userDetails.getUsername())
+            .setIssuedAt(now)
+            .setExpiration(expiryDate)
+            .setIssuer(jwtIssuer)
+            .signWith(getSigningKey(), SignatureAlgorithm.HS512)
+            .compact();
+    }
+    /**
+     * Generates a refresh token with custom claims for the given user details.
+     *
+     * @param extraClaims Additional claims to include in the token
+     * @param userDetails The user details
+     * @return A refresh token
+     */
+    public String generateRefreshToken(Map<String, Object> extraClaims, UserDetails userDetails) {
+        final Date now = new Date();
+        final Date expiryDate = new Date(now.getTime() + refreshTokenExpiration);
+        log.debug("Generating JWT refresh token for user: {}", userDetails.getUsername());
+        return Jwts
+            .builder()
+            .setClaims(extraClaims)
+            .setSubject(userDetails.getUsername())
+            .setIssuedAt(now)
+            .setExpiration(expiryDate)
+            .setIssuer(jwtIssuer)
+            .signWith(getSigningKey(), SignatureAlgorithm.HS512)
+            .compact();
+    }
+    /**
+     * Extracts the username from a JWT token.
+     *
+     * @param token The JWT token
+     * @return The username
+     */
+    public String getUsernameFromToken(String token) {
+        return getAllClaimsFromToken(token).getSubject();
+    }
+    /**
+     * Extracts the authorities from a JWT token.
+     *
+     * @param token The JWT token
+     * @return The authorities as a comma-separated string
+     */
+    public String getAuthoritiesFromToken(String token) {
+        final Claims claims = getAllClaimsFromToken(token);
+        return claims.get(AUTHORITIES_KEY, String.class);
+    }
+    /**
+     * Checks if the token is a refresh token.
+     *
+     * @param token The JWT token
+     * @return true if it's a refresh token, false otherwise
+     */
+    public boolean isRefreshToken(String token) {
+        final Claims claims = getAllClaimsFromToken(token);
+        return TOKEN_TYPE_REFRESH.equals(claims.get(TOKEN_TYPE_KEY));
+    }
+    /**
+     * Get the token ID from a JWT token.
+     *
+     * @param token The JWT token
+     * @return The token ID
+     */
+    public String getTokenId(String token) {
+        final Claims claims = getAllClaimsFromToken(token);
+        return claims.get(TOKEN_ID_KEY, String.class);
+    }
+    /**
+     * Validates a JWT token.
+     *
+     * @param token The JWT token to validate
+     * @return true if the token is valid, false otherwise
+     */
+    public boolean validateToken(String token) {
+        try {
+            final Claims claims = getAllClaimsFromToken(token);
+            return !claims.getExpiration().before(new Date());
+        } catch (JwtException | IllegalArgumentException e) {
+            log.error("Invalid JWT token: {}", e.getMessage());
+            throw new JwtException("Invalid JWT token");
+        }
+    }
+    /**
+     * Extracts all claims from a JWT token.
+     *
+     * @param token The JWT token
+     * @return The claims
+     */
+    private Claims getAllClaimsFromToken(String token) {
+        return Jwts.parserBuilder().setSigningKey(getSigningKey()).build().parseClaimsJws(token).getBody();
+    }
+    /**
+     * Gets the signing key for JWT token generation and validation.
+     *
+     * @return The signing key
+     */
+    private SecretKey getSigningKey() {
+        final byte[] keyBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
+        return Keys.hmacShaKeyFor(keyBytes);
+    }
+    /**
+     * Generates a secure random token ID.
+     *
+     * @return A random string to use as token ID
+     */
+    private String generateTokenId() {
+        byte[] randomBytes = new byte[32];
+        secureRandom.nextBytes(randomBytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
+    }
+}
+
+// src/main/java/com/spacedlearning/service/impl/ModuleProgressServiceImpl.java
+/**
+ * Implementation of ModuleProgressService
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class ModuleProgressServiceImpl implements ModuleProgressService {
+	private final ModuleProgressRepository progressRepository;
+	private final ModuleRepository moduleRepository;
+	private final UserRepository userRepository;
+	private final ModuleProgressMapper progressMapper;
+	private final RepetitionService repetitionService;
+	@Override
+	@Transactional
+	@CacheEvict(value = { "userModuleProgress", "moduleProgress" }, allEntries = true)
+	public ModuleProgressDetailResponse create(ModuleProgressCreateRequest request) {
+		log.debug("Creating new module progress: {}", request);
+		final Module module = moduleRepository.findById(request.getModuleId())
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound("Module", request.getModuleId()));
+		final User user = userRepository.findById(request.getUserId())
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound("User", request.getUserId()));
+		if (progressRepository.existsByUserIdAndModuleId(request.getUserId(), request.getModuleId())) {
+			throw SpacedLearningException.resourceAlreadyExists("ModuleProgress", "user_id and module_id",
+					request.getUserId() + ", " + request.getModuleId());
+		}
+		final ModuleProgress progress = progressMapper.toEntity(request, module, user);
+		final ModuleProgress savedProgress = progressRepository.save(progress);
+		log.info("Module progress created successfully with ID: {}", savedProgress.getId());
+		repetitionService.createDefaultSchedule(savedProgress.getId());
+		return progressMapper.toDto(savedProgress);
+	}
+	@Override
+	@Transactional
+	@CacheEvict(value = { "userModuleProgress", "moduleProgress" }, key = "#id")
+	public void delete(UUID id) {
+		log.debug("Deleting module progress with ID: {}", id);
+		final ModuleProgress progress = progressRepository.findById(id)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound("ModuleProgress", id));
+		progress.softDelete(); // Use soft delete
+		progressRepository.save(progress);
+		log.info("Module progress soft deleted successfully with ID: {}", id);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public Page<ModuleProgressSummaryResponse> findAll(Pageable pageable) {
+		log.debug("Finding all module progress with pagination: {}", pageable);
+		return progressRepository.findAll(pageable).map(progressMapper::toSummaryDto);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	@Cacheable(value = "moduleProgress", key = "#id")
+	public ModuleProgressDetailResponse findById(UUID id) {
+		log.debug("Finding module progress by ID: {}", id);
+		final ModuleProgress progress = progressRepository.findWithRepetitionsById(id)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound("ModuleProgress", id));
+		return progressMapper.toDto(progress);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public Page<ModuleProgressSummaryResponse> findByModuleId(UUID moduleId, Pageable pageable) {
+		log.debug("Finding module progress by module ID: {}, pageable: {}", moduleId, pageable);
+		if (!moduleRepository.existsById(moduleId)) {
+			throw SpacedLearningException.resourceNotFound("Module", moduleId);
+		}
+		return progressRepository.findByModuleId(moduleId, pageable).map(progressMapper::toSummaryDto);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public Page<ModuleProgressSummaryResponse> findByUserId(UUID userId, Pageable pageable) {
+		log.debug("Finding module progress by user ID: {}, pageable: {}", userId, pageable);
+		if (!userRepository.existsById(userId)) {
+			throw SpacedLearningException.resourceNotFound("User", userId);
+		}
+		return progressRepository.findByUserId(userId, pageable).map(progressMapper::toSummaryDto);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public Page<ModuleProgressSummaryResponse> findByUserIdAndBookId(UUID userId, UUID bookId, Pageable pageable) {
+		log.debug("Finding module progress by user ID: {} and book ID: {}, pageable: {}", userId, bookId, pageable);
+		if (!userRepository.existsById(userId)) {
+			throw SpacedLearningException.resourceNotFound("User", userId);
+		}
+		return progressRepository.findByUserAndBook(userId, bookId, pageable).map(progressMapper::toSummaryDto);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	@Cacheable(value = "userModuleProgress", key = "#userId + '_' + #moduleId")
+	public ModuleProgressDetailResponse findByUserIdAndModuleId(UUID userId, UUID moduleId) {
+		log.debug("Finding module progress by user ID: {} and module ID: {}", userId, moduleId);
+		final ModuleProgress progress = progressRepository.findByUserIdAndModuleId(userId, moduleId)
+				.orElseThrow(() -> SpacedLearningException
+						.resourceNotFound("ModuleProgress for User " + userId + " and Module " + moduleId, null));
+		return progressMapper.toDto(progress);
+	}
+	@Override
+    @Transactional(readOnly = true)
+    public Page<ModuleProgressSummaryResponse> findDueForStudy(UUID userId, LocalDate studyDate, Pageable pageable) {
+        log.debug("Finding module progress due for study for user ID: {} on or before date: {}, pageable: {}",
+                userId, studyDate, pageable);
+        if (!userRepository.existsById(userId)) {
+            throw SpacedLearningException.resourceNotFound("User", userId);
+        }
+        final LocalDate dateToCheck = studyDate != null ? studyDate : LocalDate.now();
+        return progressRepository.findDueForStudy(userId, dateToCheck, pageable)
+                .map(progressMapper::toSummaryDto);
+    }
+	@Override
+	@Transactional
+	@CacheEvict(value = { "userModuleProgress", "moduleProgress" }, key = "#id")
+	public ModuleProgressDetailResponse update(UUID id, ModuleProgressUpdateRequest request) {
+		log.debug("Updating module progress with ID: {}, request: {}", id, request);
+		final ModuleProgress progress = progressRepository.findById(id)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound("ModuleProgress", id));
+		progressMapper.updateFromDto(request, progress);
+		final ModuleProgress updatedProgress = progressRepository.save(progress);
+		log.info("Module progress updated successfully with ID: {}", updatedProgress.getId());
+		return progressMapper.toDto(updatedProgress);
+	}
+}
+
+// src/main/java/com/spacedlearning/controller/ModuleProgressController.java
+/**
+ * REST controller for ModuleProgress operations
+ */
+@RestController
+@RequestMapping("/api/v1/progress")
+@RequiredArgsConstructor
+@Slf4j
+@Tag(name = "Module Progress API", description = "Endpoints for managing module progress")
+public class ModuleProgressController {
+	private final ModuleProgressService progressService;
+	@PostMapping
+	@Operation(summary = "Create progress", description = "Creates a new progress record")
+	public ResponseEntity<DataResponse<ModuleProgressDetailResponse>> createProgress(
+			@Valid @RequestBody ModuleProgressCreateRequest request) {
+		log.debug("REST request to create progress: {}", request);
+		final ModuleProgressDetailResponse createdProgress = progressService.create(request);
+		return ResponseEntity.status(HttpStatus.CREATED).body(DataResponse.of(createdProgress));
+	}
+	@DeleteMapping("/{id}")
+	@Operation(summary = "Delete progress", description = "Deletes a progress record by ID")
+	public ResponseEntity<SuccessResponse> deleteProgress(@PathVariable UUID id) {
+		log.debug("REST request to delete progress with ID: {}", id);
+		progressService.delete(id);
+		return ResponseEntity.ok(SuccessResponse.of("Progress deleted successfully"));
+	}
+	@GetMapping
+	@PreAuthorize("hasRole('ADMIN')")
+	@Operation(summary = "Get all progress records", description = "Retrieves a paginated list of all progress records")
+	public ResponseEntity<PageResponse<ModuleProgressSummaryResponse>> getAllProgress(
+			@PageableDefault(size = 20) Pageable pageable) {
+		log.debug("REST request to get all progress records, pageable: {}", pageable);
+		final Page<ModuleProgressSummaryResponse> page = progressService.findAll(pageable);
+		return ResponseEntity.ok(PageUtils.createPageResponse(page, pageable));
+	}
+	@GetMapping("/user/{userId}/due")
+	@Operation(summary = "Get due progress records", description = "Retrieves a paginated list of progress records due for study")
+	public ResponseEntity<PageResponse<ModuleProgressSummaryResponse>> getDueProgress(@PathVariable UUID userId,
+			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate studyDate,
+			@PageableDefault(size = 20) Pageable pageable) {
+		log.debug("REST request to get due progress records for user ID: {} on date: {}, pageable: {}", userId,
+				studyDate, pageable);
+		final Page<ModuleProgressSummaryResponse> page = progressService.findDueForStudy(userId, studyDate, pageable);
+		return ResponseEntity.ok(PageUtils.createPageResponse(page, pageable));
+	}
+	@GetMapping("/{id}")
+	@Operation(summary = "Get progress by ID", description = "Retrieves a progress record by its ID with detailed information")
+	public ResponseEntity<DataResponse<ModuleProgressDetailResponse>> getProgress(@PathVariable UUID id) {
+		log.debug("REST request to get progress with ID: {}", id);
+		final ModuleProgressDetailResponse progress = progressService.findById(id);
+		return ResponseEntity.ok(DataResponse.of(progress));
+	}
+	@GetMapping("/module/{moduleId}")
+	@PreAuthorize("hasRole('ADMIN')")
+	@Operation(summary = "Get progress by module ID", description = "Retrieves a paginated list of progress records for a module")
+	public ResponseEntity<PageResponse<ModuleProgressSummaryResponse>> getProgressByModuleId(
+			@PathVariable UUID moduleId, @PageableDefault(size = 20) Pageable pageable) {
+		log.debug("REST request to get progress by module ID: {}, pageable: {}", moduleId, pageable);
+		final Page<ModuleProgressSummaryResponse> page = progressService.findByModuleId(moduleId, pageable);
+		return ResponseEntity.ok(PageUtils.createPageResponse(page, pageable));
+	}
+	@GetMapping("/user/{userId}/book/{bookId}")
+	@Operation(summary = "Get progress by user and book", description = "Retrieves a paginated list of progress records for a user and book")
+	public ResponseEntity<PageResponse<ModuleProgressSummaryResponse>> getProgressByUserAndBook(
+			@PathVariable UUID userId, @PathVariable UUID bookId, @PageableDefault(size = 20) Pageable pageable) {
+		log.debug("REST request to get progress by user ID: {} and book ID: {}, pageable: {}", userId, bookId,
+				pageable);
+		final Page<ModuleProgressSummaryResponse> page = progressService.findByUserIdAndBookId(userId, bookId,
+				pageable);
+		return ResponseEntity.ok(PageUtils.createPageResponse(page, pageable));
+	}
+	@GetMapping("/user/{userId}/module/{moduleId}")
+	@Operation(summary = "Get progress by user and module", description = "Retrieves a progress record for a specific user and module")
+	public ResponseEntity<DataResponse<ModuleProgressDetailResponse>> getProgressByUserAndModule(
+			@PathVariable UUID userId, @PathVariable UUID moduleId) {
+		log.debug("REST request to get progress by user ID: {} and module ID: {}", userId, moduleId);
+		final ModuleProgressDetailResponse progress = progressService.findByUserIdAndModuleId(userId, moduleId);
+		return ResponseEntity.ok(DataResponse.of(progress));
+	}
+	@GetMapping("/user/{userId}")
+	@Operation(summary = "Get progress by user ID", description = "Retrieves a paginated list of progress records for a user")
+	public ResponseEntity<PageResponse<ModuleProgressSummaryResponse>> getProgressByUserId(@PathVariable UUID userId,
+			@PageableDefault(size = 20) Pageable pageable) {
+		log.debug("REST request to get progress by user ID: {}, pageable: {}", userId, pageable);
+		final Page<ModuleProgressSummaryResponse> page = progressService.findByUserId(userId, pageable);
+		return ResponseEntity.ok(PageUtils.createPageResponse(page, pageable));
+	}
+	@PutMapping("/{id}")
+	@Operation(summary = "Update progress", description = "Updates an existing progress record")
+	public ResponseEntity<DataResponse<ModuleProgressDetailResponse>> updateProgress(@PathVariable UUID id,
+			@Valid @RequestBody ModuleProgressUpdateRequest request) {
+		log.debug("REST request to update progress with ID: {}, request: {}", id, request);
+		final ModuleProgressDetailResponse updatedProgress = progressService.update(id, request);
+		return ResponseEntity.ok(DataResponse.of(updatedProgress));
+	}
+}
+
+// src/main/java/com/spacedlearning/security/JwtAuthorizationFilter.java
+/**
+ * Filter for JWT authorization. Validates JWT tokens and sets up security
+ * context for authenticated requests.
+ */
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class JwtAuthorizationFilter extends OncePerRequestFilter {
+    private static final String BEARER_PREFIX = "Bearer ";
+    private final JwtTokenProvider tokenProvider;
+    private final UserDetailsService userDetailsService;
+    private final ObjectMapper objectMapper;
+    private final RequestMatcher publicPaths = new OrRequestMatcher(
+        new AntPathRequestMatcher("/api/v1/auth/login"),
+        new AntPathRequestMatcher("/api/v1/auth/register"),
+        new AntPathRequestMatcher("/api/v1/auth/validate"),
+        new AntPathRequestMatcher("/swagger-ui/**"),
+        new AntPathRequestMatcher("/v3/api-docs/**"),
+        new AntPathRequestMatcher("/actuator/health"),
+			new AntPathRequestMatcher("/error"));
+    /**
+     * Filters incoming requests to validate JWT tokens and set up security context.
+     *
+     * @param request     The HTTP request
+     * @param response    The HTTP response
+     * @param filterChain The filter chain
+     * @throws ServletException If a servlet exception occurs
+     * @throws IOException      If an I/O error occurs
+     */
+    @Override
+    protected void doFilterInternal(
+            @NonNull HttpServletRequest request,
+            @NonNull HttpServletResponse response,
+            @NonNull FilterChain filterChain)
+			throws ServletException, IOException {
+        try {
+            final String token = extractTokenFromRequest(request);
+			if (StringUtils.isNotBlank(token) && SecurityContextHolder.getContext().getAuthentication() == null) {
+                processToken(token, response);
+            }
+            filterChain.doFilter(request, response);
+        } catch (final AuthenticationException e) {
+            log.error("Authentication error: {}", e.getMessage());
+            sendErrorResponse(response, e.getMessage(), HttpStatus.UNAUTHORIZED);
+        } catch (final Exception e) {
+            log.error("Unexpected error in JWT filter: {}", e.getMessage(), e);
+            sendErrorResponse(response, "Internal security error", HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+    /**
+     * Extracts JWT token from request Authorization header.
+     *
+     * @param request The HTTP request
+     * @return The JWT token or null if not found
+     */
+    private String extractTokenFromRequest(HttpServletRequest request) {
+        final String bearerToken = request.getHeader(HttpHeaders.AUTHORIZATION);
+		if (StringUtils.isNotBlank(bearerToken) && bearerToken.startsWith(BEARER_PREFIX)) {
+            return bearerToken.substring(BEARER_PREFIX.length());
+        }
+        return null;
+    }
+    /**
+     * Process and validate the JWT token.
+     *
+     * @param token    The JWT token to validate
+     * @param response The HTTP response
+     * @return true if processing succeeded, false if an error response was sent
+     * @throws IOException If an I/O error occurs when sending an error response
+     */
+    private boolean processToken(String token, HttpServletResponse response) throws IOException {
+        try {
+			if (!tokenProvider.validateToken(token)) {
+				sendErrorResponse(response, "Invalid token", HttpStatus.UNAUTHORIZED);
+				return false;
+            }
+			final String username = tokenProvider.getUsernameFromToken(token);
+			final UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+			final UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(userDetails,
+					null, userDetails.getAuthorities());
+			SecurityContextHolder.getContext().setAuthentication(authToken);
+			log.debug("Set authentication for user: {}", username);
+			return true;
+        } catch (final ExpiredJwtException e) {
+            log.warn("JWT token expired: {}", e.getMessage());
+            sendErrorResponse(response, "Token has expired", HttpStatus.UNAUTHORIZED);
+            return false;
+        } catch (MalformedJwtException | SignatureException e) {
+            log.warn("Invalid JWT token: {}", e.getMessage());
+            sendErrorResponse(response, "Invalid token format", HttpStatus.UNAUTHORIZED);
+            return false;
+        } catch (final JwtException e) {
+            log.error("JWT token validation error: {}", e.getMessage());
+            sendErrorResponse(response, "Token validation failed", HttpStatus.UNAUTHORIZED);
+            return false;
+        }
+    }
+    /**
+     * Sends error response when authentication fails.
+     *
+     * @param response     The HTTP response
+     * @param errorMessage The error message
+     * @param status       The HTTP status
+     * @throws IOException If an I/O error occurs
+     */
+    private void sendErrorResponse(HttpServletResponse response, String errorMessage, HttpStatus status)
+            throws IOException {
+        final ApiError errorResponse = ApiError
+            .builder()
+            .timestamp(LocalDateTime.now())
+            .status(status.value())
+            .error(status.getReasonPhrase())
+            .message("JWT authentication failed: " + errorMessage)
+            .path("") // Path not available in filter
+            .build();
+        response.setStatus(status.value());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        objectMapper.writeValue(response.getOutputStream(), errorResponse);
+    }
+    /**
+     * Determine if a request should not be filtered.
+     *
+     * @param request The HTTP request
+     * @return true if the request should be skipped
+     */
+    @Override
+	protected boolean shouldNotFilter(@NonNull HttpServletRequest request) {
+        return publicPaths.matches(request);
+    }
+}
+
+// src/main/java/com/spacedlearning/service/impl/AuthServiceImpl.java
+/**
+ * Implementation of AuthService
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class AuthServiceImpl implements AuthService {
+	private static final String DEFAULT_ROLE = "ROLE_USER";
+	private final UserRepository userRepository;
+	private final RoleRepository roleRepository;
+	private final UserMapper userMapper;
+	private final AuthenticationManager authenticationManager;
+	private final JwtTokenProvider tokenProvider;
+	private final MessageSource messageSource;
+	@Override
+	@Transactional(readOnly = true)
+	public AuthResponse authenticate(final AuthRequest request) {
+		Objects.requireNonNull(request, "Auth request must not be null");
+		Objects.requireNonNull(request.getEmail(), "Email must not be null");
+		Objects.requireNonNull(request.getPassword(), "Password must not be null");
+		log.debug("Authenticating user with email: {}", request.getEmail());
+		final Authentication authentication = authenticationManager
+				.authenticate(new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword()));
+		SecurityContextHolder.getContext().setAuthentication(authentication);
+		final String accessToken = tokenProvider.generateToken(authentication);
+		final String refreshToken = tokenProvider.generateRefreshToken(authentication);
+		final UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+		final User user = userRepository.findByEmail(userDetails.getUsername())
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound(messageSource, "resource.user",
+						userDetails.getUsername()));
+		final UserResponse userResponse = userMapper.toDto(user);
+		log.info("User authenticated successfully: {}", userDetails.getUsername());
+		return AuthResponse.builder().token(accessToken).refreshToken(refreshToken).user(userResponse).build();
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public String getUsernameFromToken(final String token) {
+		if (StringUtils.isBlank(token)) {
+			throw SpacedLearningException.validationError(messageSource, "error.auth.invalidToken");
+		}
+		try {
+			return tokenProvider.getUsernameFromToken(token);
+		} catch (final JwtException e) {
+			log.error("Failed to extract username from token: {}", e.getMessage());
+			throw SpacedLearningException.forbidden(messageSource, "error.auth.invalidToken");
+		}
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public AuthResponse refreshToken(final RefreshTokenRequest request) {
+		Objects.requireNonNull(request, "Refresh token request must not be null");
+		Objects.requireNonNull(request.getRefreshToken(), "Refresh token must not be null");
+		log.debug("Refreshing token");
+		try {
+			if (!tokenProvider.validateToken(request.getRefreshToken())
+					|| !tokenProvider.isRefreshToken(request.getRefreshToken())) {
+				throw SpacedLearningException.forbidden(messageSource, "error.auth.invalidToken");
+			}
+			final String username = tokenProvider.getUsernameFromToken(request.getRefreshToken());
+			final User user = userRepository.findByEmail(username).orElseThrow(
+					() -> SpacedLearningException.resourceNotFound(messageSource, "resource.user", username));
+			final UserDetails userDetails = userMapper.loadUserByUsername(username);
+			final Authentication authentication = new UsernamePasswordAuthenticationToken(userDetails, null,
+					userDetails.getAuthorities());
+			final String accessToken = tokenProvider.generateToken(authentication);
+			final String refreshToken = tokenProvider.generateRefreshToken(authentication);
+			final UserResponse userResponse = userMapper.toDto(user);
+			log.info("Token refreshed successfully for user: {}", username);
+			return AuthResponse.builder().token(accessToken).refreshToken(refreshToken).user(userResponse).build();
+		} catch (final JwtException e) {
+			log.error("Failed to refresh token: {}", e.getMessage());
+			throw SpacedLearningException.forbidden(messageSource, "error.auth.invalidToken");
+		}
+	}
+	@Override
+    @Transactional
+	public UserResponse register(final RegisterRequest request) {
+		Objects.requireNonNull(request, "Register request must not be null");
+		Objects.requireNonNull(request.getEmail(), "Email must not be null");
+		Objects.requireNonNull(request.getPassword(), "Password must not be null");
+        log.debug("Registering new user with email: {}", request.getEmail());
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw SpacedLearningException.resourceAlreadyExists(
+					messageSource, "resource.user", "email", request.getEmail());
+        }
+        final User user = userMapper.registerRequestToEntity(request);
+		final Role userRole = roleRepository.findByName(DEFAULT_ROLE)
+				.orElseThrow(() -> new SpacedLearningException(
+						messageSource.getMessage("error.role.defaultNotFound", null, "Default role not found",
+								LocaleContextHolder.getLocale()),
+						new RuntimeException("Default role not found"), HttpStatus.INTERNAL_SERVER_ERROR));
+        user.addRole(userRole);
+        final User savedUser = userRepository.save(user);
+        log.info("User registered successfully with ID: {}", savedUser.getId());
+        return userMapper.toDto(savedUser);
+    }
+	@Override
+	@Transactional(readOnly = true)
+	public boolean validateToken(final String token) {
+		if (StringUtils.isBlank(token)) {
+			return false;
+		}
+		try {
+			return tokenProvider.validateToken(token);
+		} catch (final JwtException e) {
+			log.debug("Token validation failed: {}", e.getMessage());
+			return false;
+		}
+	}
+}
+
+// src/main/java/com/spacedlearning/exception/SpacedLearningException.java
+@Getter
+public class SpacedLearningException extends RuntimeException {
+    private static final long serialVersionUID = 1509401079030096266L;
+    /**
+     * Creates a forbidden exception with a message from MessageSource
+     *
+     * @param messageSource The message source
+     * @param key The message key
+     * @param args The message arguments
+     * @return The exception
+     */
+    public static SpacedLearningException forbidden(
+            MessageSource messageSource, String key, Object... args) {
+        Objects.requireNonNull(messageSource, "MessageSource must not be null");
+        Objects.requireNonNull(key, "Message key must not be null");
+        return new SpacedLearningException(
+            messageSource.getMessage(key, args, LocaleContextHolder.getLocale()),
+            HttpStatus.FORBIDDEN);
+    }
+    /**
+     * Creates a forbidden exception with a custom message
+     *
+     * @param message The error message
+     * @return The exception
+     */
+    public static SpacedLearningException forbidden(String message) {
+        Objects.requireNonNull(message, "Message must not be null");
+        return new SpacedLearningException(message, HttpStatus.FORBIDDEN);
+    }
+    /**
+     * Creates a resource already exists exception with a message from MessageSource
+     *
+     * @param messageSource The message source
+     * @param resourceKey The resource key
+     * @param field The field name
+     * @param value The field value
+     * @return The exception
+     */
+    public static SpacedLearningException resourceAlreadyExists(
+            MessageSource messageSource,
+            String resourceKey,
+            String field,
+            Object value) {
+        Objects.requireNonNull(messageSource, "MessageSource must not be null");
+        Objects.requireNonNull(resourceKey, "Resource key must not be null");
+        Objects.requireNonNull(field, "Field name must not be null");
+        final String resourceName = messageSource.getMessage(
+                resourceKey,
+                null,
+                resourceKey,
+                LocaleContextHolder.getLocale());
+        return new SpacedLearningException(messageSource.getMessage(
+                "error.resource.alreadyexists",
+                new Object[]{ resourceName, field, value },
+                LocaleContextHolder.getLocale()),
+                HttpStatus.CONFLICT);
+    }
+	/**
+     * Creates a resource already exists exception with a custom message
+     *
+     * @param resourceName The name of the resource
+     * @param field The field name
+     * @param value The field value
+     * @return The exception
+     */
+    public static SpacedLearningException resourceAlreadyExists(
+            String resourceName, String field, Object value) {
+        Objects.requireNonNull(resourceName, "Resource name must not be null");
+        Objects.requireNonNull(field, "Field name must not be null");
+        return new SpacedLearningException(
+            String.format("%s already exists with %s: %s", resourceName, field, value),
+            HttpStatus.CONFLICT);
+    }
+	/**
+	 * Creates a resource not found exception with a message from MessageSource
+	 * 
+	 * @param messageSource The message source
+	 * @param resourceKey   The resource key
+	 * @param id            The resource ID
+	 * @return The exception
+	 */
+	public static SpacedLearningException resourceNotFound(MessageSource messageSource, String resourceKey, Object id) {
+		Objects.requireNonNull(messageSource, "MessageSource must not be null");
+		Objects.requireNonNull(resourceKey, "Resource key must not be null");
+		final String resourceName = messageSource.getMessage(resourceKey, null, resourceKey,
+				LocaleContextHolder.getLocale());
+		return new SpacedLearningException(messageSource.getMessage("error.resource.notfound",
+				new Object[] { resourceName, id }, LocaleContextHolder.getLocale()), HttpStatus.NOT_FOUND);
+    }
+	/**
+     * Creates a resource not found exception with a custom message
+     *
+     * @param resourceName The name of the resource
+     * @param id The resource ID
+     * @return The exception
+     */
+    public static SpacedLearningException resourceNotFound(String resourceName, Object id) {
+        Objects.requireNonNull(resourceName, "Resource name must not be null");
+        return new SpacedLearningException(
+                String.format("%s not found with id: %s", resourceName, id),
+                HttpStatus.NOT_FOUND);
+    }
+	/**
+     * Creates an unauthorized exception with a message from MessageSource
+     *
+     * @param messageSource The message source
+     * @param key The message key
+     * @param args The message arguments
+     * @return The exception
+     */
+    public static SpacedLearningException unauthorized(
+            MessageSource messageSource, String key, Object... args) {
+        Objects.requireNonNull(messageSource, "MessageSource must not be null");
+        Objects.requireNonNull(key, "Message key must not be null");
+        return new SpacedLearningException(
+            messageSource.getMessage(key, args, LocaleContextHolder.getLocale()),
+            HttpStatus.UNAUTHORIZED);
+    }
+	/**
+     * Creates an unauthorized exception with a custom message
+     *
+     * @param message The error message
+     * @return The exception
+     */
+    public static SpacedLearningException unauthorized(String message) {
+        Objects.requireNonNull(message, "Message must not be null");
+        return new SpacedLearningException(message, HttpStatus.UNAUTHORIZED);
+    }
+	/**
+	 * Creates a validation error exception with a message from MessageSource
+	 * 
+	 * @param messageSource The message source
+	 * @param key           The message key
+	 * @param args          The message arguments
+	 * @return The exception
+	 */
+	public static SpacedLearningException validationError(MessageSource messageSource, String key, Object... args) {
+		Objects.requireNonNull(messageSource, "MessageSource must not be null");
+		Objects.requireNonNull(key, "Message key must not be null");
+        return new SpacedLearningException(
+            messageSource.getMessage(key, args, LocaleContextHolder.getLocale()),
+            HttpStatus.BAD_REQUEST);
+    }
+	/**
+     * Creates a validation error exception with a custom message
+     *
+     * @param message The error message
+     * @return The exception
+     */
+    public static SpacedLearningException validationError(String message) {
+        Objects.requireNonNull(message, "Message must not be null");
+        return new SpacedLearningException(message, HttpStatus.BAD_REQUEST);
+    }
+	private final HttpStatus status;
+	public SpacedLearningException(String message, HttpStatus status) {
+		super(message);
+		this.status = status;
+	}
+	public SpacedLearningException(String message, Throwable cause, HttpStatus status) {
+        super(message, cause);
+        this.status = status;
+    }
+}
+
+// src/main/java/com/spacedlearning/security/JwtAuthenticationFilter.java
+/**
+ * Filter for JWT authentication. Processes login requests and generates JWT
+ * tokens upon successful authentication.
+ */
+@RequiredArgsConstructor
+@Slf4j
+public class JwtAuthenticationFilter extends UsernamePasswordAuthenticationFilter {
+    private final AuthenticationManager authenticationManager;
+    private final JwtTokenProvider tokenProvider;
+    private final ObjectMapper objectMapper;
+    private final UserMapper userMapper;
+    /**
+     * Attempt authentication based on credentials in the request.
+     *
+     * @param request  the HTTP request containing login credentials
+     * @param response the HTTP response
+     * @return Authentication object if successful
+     * @throws AuthenticationException if authentication fails
+     */
+    @Override
+    public Authentication attemptAuthentication(
+            HttpServletRequest request,
+            HttpServletResponse response) throws AuthenticationException {
+        try {
+            final AuthRequest authRequest = objectMapper.readValue(request.getInputStream(), AuthRequest.class);
+            Objects.requireNonNull(authRequest, "Authentication request cannot be null");
+            Objects.requireNonNull(authRequest.getEmail(), "Email cannot be null");
+            Objects.requireNonNull(authRequest.getPassword(), "Password cannot be null");
+            log.debug("Attempting authentication for user: {}", authRequest.getEmail());
+            final Authentication authentication = new UsernamePasswordAuthenticationToken(
+                authRequest.getEmail(),
+                authRequest.getPassword());
+            return authenticationManager.authenticate(authentication);
+        } catch (final IOException e) {
+            log.error("Failed to parse authentication request", e);
+            throw new AuthenticationServiceException("Failed to parse authentication request", e);
+        } catch (final NullPointerException e) {
+            log.error("Invalid authentication request: {}", e.getMessage());
+            throw new AuthenticationServiceException("Invalid authentication request: " + e.getMessage(), e);
+        }
+    }
+    /**
+     * Handle successful authentication by generating JWT token.
+     *
+     * @param request    the HTTP request
+     * @param response   the HTTP response
+     * @param chain      the filter chain
+     * @param authResult the successful authentication result
+     * @throws IOException      if an I/O error occurs
+     * @throws ServletException if a servlet error occurs
+     */
+    @Override
+    protected void successfulAuthentication(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            FilterChain chain,
+            Authentication authResult) throws IOException, ServletException {
+        final UserDetails userDetails = (UserDetails) authResult.getPrincipal();
+        log.info("Authentication successful for user: {}", userDetails.getUsername());
+        User user = null;
+        if (authResult.getPrincipal() instanceof CustomUserDetails) {
+            user = ((CustomUserDetails) authResult.getPrincipal()).getUser();
+        }
+        final String token = tokenProvider.generateToken(authResult);
+        final UserResponse userResponse = user != null ? userMapper.toDto(user)
+                : UserResponse
+                    .builder()
+                    .email(userDetails.getUsername())
+                    .roles(
+                        userDetails
+                            .getAuthorities()
+                            .stream()
+                            .map(auth -> auth.getAuthority().replace("ROLE_", ""))
+                            .toList())
+                    .build();
+        final AuthResponse authResponse = AuthResponse.builder().token(token).user(userResponse).build();
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setStatus(HttpStatus.OK.value());
+        objectMapper.writeValue(response.getOutputStream(), authResponse);
+    }
+    /**
+     * Handle failed authentication.
+     *
+     * @param request  the HTTP request
+     * @param response the HTTP response
+     * @param failed   the authentication exception
+     * @throws IOException      if an I/O error occurs
+     * @throws ServletException if a servlet error occurs
+     */
+    @Override
+    protected void unsuccessfulAuthentication(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            AuthenticationException failed) throws IOException, ServletException {
+        log.warn("Authentication failed: {}", failed.getMessage());
+        final ApiError errorResponse = ApiError
+            .builder()
+            .timestamp(LocalDateTime.now())
+            .status(HttpStatus.UNAUTHORIZED.value())
+            .error(HttpStatus.UNAUTHORIZED.getReasonPhrase())
+            .message("Authentication failed: " + failed.getMessage())
+            .path(request.getRequestURI())
+            .build();
+        response.setStatus(HttpStatus.UNAUTHORIZED.value());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        objectMapper.writeValue(response.getOutputStream(), errorResponse);
+    }
+}
+
+// src/main/java/com/spacedlearning/controller/RepetitionController.java
+/**
+ * REST controller for Repetition operations
+ */
+@RestController
+@RequestMapping("/api/v1/repetitions")
+@RequiredArgsConstructor
+@Slf4j
+@Tag(name = "Repetition API", description = "Endpoints for managing repetitions")
+public class RepetitionController {
+	private final RepetitionService repetitionService;
+	@PostMapping("/progress/{progressId}/schedule")
+	@Operation(summary = "Create default schedule", description = "Creates a default repetition schedule for a progress record")
+	public ResponseEntity<DataResponse<List<RepetitionResponse>>> createDefaultSchedule(@PathVariable UUID progressId) {
+		log.debug("REST request to create default repetition schedule for progress ID: {}", progressId);
+		final List<RepetitionResponse> schedule = repetitionService.createDefaultSchedule(progressId);
+		return ResponseEntity.status(HttpStatus.CREATED).body(DataResponse.of(schedule));
+	}
+	@PostMapping
+	@Operation(summary = "Create repetition", description = "Creates a new repetition")
+	public ResponseEntity<DataResponse<RepetitionResponse>> createRepetition(
+			@Valid @RequestBody RepetitionCreateRequest request) {
+		log.debug("REST request to create repetition: {}", request);
+		final RepetitionResponse createdRepetition = repetitionService.create(request);
+		return ResponseEntity.status(HttpStatus.CREATED).body(DataResponse.of(createdRepetition));
+	}
+	@DeleteMapping("/{id}")
+	@Operation(summary = "Delete repetition", description = "Deletes a repetition by ID")
+	public ResponseEntity<SuccessResponse> deleteRepetition(@PathVariable UUID id) {
+		log.debug("REST request to delete repetition with ID: {}", id);
+		repetitionService.delete(id);
+		return ResponseEntity.ok(SuccessResponse.of("Repetition deleted successfully"));
+	}
+	@GetMapping
+	@Operation(summary = "Get all repetitions", description = "Retrieves a paginated list of all repetitions")
+	public ResponseEntity<PageResponse<RepetitionResponse>> getAllRepetitions(
+			@PageableDefault(size = 20) Pageable pageable) {
+		log.debug("REST request to get all repetitions, pageable: {}", pageable);
+		final Page<RepetitionResponse> page = repetitionService.findAll(pageable);
+		return ResponseEntity.ok(PageUtils.createPageResponse(page, pageable));
+	}
+	@GetMapping("/user/{userId}/due")
+	@Operation(summary = "Get due repetitions", description = "Retrieves a paginated list of repetitions due for review")
+	public ResponseEntity<PageResponse<RepetitionResponse>> getDueRepetitions(@PathVariable UUID userId,
+			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reviewDate,
+			@RequestParam(required = false) RepetitionStatus status, @PageableDefault(size = 20) Pageable pageable) {
+		log.debug("REST request to get due repetitions for user ID: {} on date: {}, status: {}, pageable: {}", userId,
+				reviewDate, status, pageable);
+		final Page<RepetitionResponse> page = repetitionService.findDueRepetitions(userId, reviewDate, status,
+				pageable);
+		return ResponseEntity.ok(PageUtils.createPageResponse(page, pageable));
+	}
+	@GetMapping("/{id}")
+	@Operation(summary = "Get repetition by ID", description = "Retrieves a repetition by its ID")
+	public ResponseEntity<DataResponse<RepetitionResponse>> getRepetition(@PathVariable UUID id) {
+		log.debug("REST request to get repetition with ID: {}", id);
+		final RepetitionResponse repetition = repetitionService.findById(id);
+		return ResponseEntity.ok(DataResponse.of(repetition));
+	}
+	@GetMapping("/progress/{progressId}/order/{order}")
+	@Operation(summary = "Get repetition by progress ID and order", description = "Retrieves a repetition for a specific progress record and order")
+	public ResponseEntity<DataResponse<RepetitionResponse>> getRepetitionByProgressIdAndOrder(
+			@PathVariable UUID progressId, @PathVariable RepetitionOrder order) {
+		log.debug("REST request to get repetition by progress ID: {} and order: {}", progressId, order);
+		final RepetitionResponse repetition = repetitionService.findByModuleProgressIdAndOrder(progressId, order);
+		return ResponseEntity.ok(DataResponse.of(repetition));
+	}
+	@GetMapping("/progress/{progressId}")
+    @Operation(summary = "Get repetitions by progress ID", description = "Retrieves a list of repetitions for a progress record")
+    public ResponseEntity<DataResponse<List<RepetitionResponse>>> getRepetitionsByProgressId(
+            @PathVariable UUID progressId) {
+        log.debug("REST request to get repetitions by progress ID: {}", progressId);
+        final List<RepetitionResponse> repetitions = repetitionService.findByModuleProgressId(progressId);
+        return ResponseEntity.ok(DataResponse.of(repetitions));
+    }
+	@PutMapping("/{id}")
+	@Operation(summary = "Update repetition", description = "Updates an existing repetition")
+	public ResponseEntity<DataResponse<RepetitionResponse>> updateRepetition(@PathVariable UUID id,
+			@Valid @RequestBody RepetitionUpdateRequest request) {
+		log.debug("REST request to update repetition with ID: {}, request: {}", id, request);
+		final RepetitionResponse updatedRepetition = repetitionService.update(id, request);
+		return ResponseEntity.ok(DataResponse.of(updatedRepetition));
+	}
+}
+
+// src/main/java/com/spacedlearning/service/impl/ModuleServiceImpl.java
+/**
+ * Implementation of ModuleService
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class ModuleServiceImpl implements ModuleService {
+	private final ModuleRepository moduleRepository;
+	private final BookRepository bookRepository;
+	private final ModuleMapper moduleMapper;
+	private final MessageSource messageSource;
+	@Override
+	@Transactional
+	@CacheEvict(value = "bookModules", key = "#result.bookId")
+	public ModuleDetailResponse create(final ModuleCreateRequest request) {
+		Objects.requireNonNull(request, "Module create request must not be null");
+		log.debug("Creating new module: {}", request);
+		final Book book = bookRepository.findById(request.getBookId()).orElseThrow(
+				() -> SpacedLearningException.resourceNotFound(messageSource, "resource.book", request.getBookId()));
+		if (moduleRepository.existsByBookIdAndModuleNo(request.getBookId(), request.getModuleNo())) {
+			throw SpacedLearningException.validationError(messageSource, "error.module.duplicate.number",
+					request.getModuleNo());
+		}
+		final Module module = moduleMapper.toEntity(request, book);
+		final Module savedModule = moduleRepository.save(module);
+		log.info("Module created successfully with ID: {}", savedModule.getId());
+		return moduleMapper.toDto(savedModule);
+	}
+	@Override
+	@Transactional
+	@CacheEvict(value = { "modules", "bookModules" }, allEntries = true)
+	public void delete(final UUID id) {
+		Objects.requireNonNull(id, "Module ID must not be null");
+		log.debug("Deleting module with ID: {}", id);
+		final Module module = moduleRepository.findById(id)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound(messageSource, "resource.module", id));
+		module.softDelete(); // Use soft delete
+		moduleRepository.save(module);
+		log.info("Module soft deleted successfully with ID: {}", id);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public Page<ModuleSummaryResponse> findAll(final Pageable pageable) {
+		Objects.requireNonNull(pageable, "Pageable must not be null");
+		log.debug("Finding all modules with pagination: {}", pageable);
+		return moduleRepository.findAll(pageable).map(moduleMapper::toSummaryDto);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	@Cacheable(value = "bookModules", key = "#bookId")
+	public List<ModuleSummaryResponse> findAllByBookId(final UUID bookId) {
+		Objects.requireNonNull(bookId, "Book ID must not be null");
+		log.debug("Finding all modules by book ID: {}", bookId);
+		if (!bookRepository.existsById(bookId)) {
+			throw SpacedLearningException.resourceNotFound(messageSource, "resource.book", bookId);
+		}
+		final List<Module> modules = moduleRepository.findByBookIdOrderByModuleNo(bookId);
+		return moduleMapper.toSummaryDtoList(modules);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public Page<ModuleSummaryResponse> findByBookId(final UUID bookId, final Pageable pageable) {
+		Objects.requireNonNull(bookId, "Book ID must not be null");
+		Objects.requireNonNull(pageable, "Pageable must not be null");
+		log.debug("Finding modules by book ID: {}, pageable: {}", bookId, pageable);
+		if (!bookRepository.existsById(bookId)) {
+			throw SpacedLearningException.resourceNotFound(messageSource, "resource.book", bookId);
+		}
+		return moduleRepository.findByBookId(bookId, pageable).map(moduleMapper::toSummaryDto);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	@Cacheable(value = "modules", key = "#id")
+	public ModuleDetailResponse findById(final UUID id) {
+		Objects.requireNonNull(id, "Module ID must not be null");
+		log.debug("Finding module by ID: {}", id);
+		return moduleRepository.findWithProgressById(id).map(moduleMapper::toDto)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound(messageSource, "resource.module", id));
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public Integer getNextModuleNumber(final UUID bookId) {
+		Objects.requireNonNull(bookId, "Book ID must not be null");
+		log.debug("Getting next module number for book ID: {}", bookId);
+		if (!bookRepository.existsById(bookId)) {
+			throw SpacedLearningException.resourceNotFound(messageSource, "resource.book", bookId);
+		}
+		final Integer maxModuleNo = moduleRepository.findMaxModuleNoByBookId(bookId);
+		return maxModuleNo + 1;
+	}
+	@Override
+	@Transactional
+	@CacheEvict(value = { "modules", "bookModules" }, allEntries = true)
+	public ModuleDetailResponse update(final UUID id, final ModuleUpdateRequest request) {
+		Objects.requireNonNull(id, "Module ID must not be null");
+		Objects.requireNonNull(request, "Module update request must not be null");
+		log.debug("Updating module with ID: {}, request: {}", id, request);
+		final Module module = moduleRepository.findById(id)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound(messageSource, "resource.module", id));
+		if (request.getModuleNo() != null && !request.getModuleNo().equals(module.getModuleNo())
+				&& moduleRepository.existsByBookIdAndModuleNo(module.getBook().getId(), request.getModuleNo())) {
+			throw SpacedLearningException.validationError(messageSource, "error.module.duplicate.number",
+					request.getModuleNo());
+		}
+		moduleMapper.updateFromDto(request, module);
+		final Module updatedModule = moduleRepository.save(module);
+		log.info("Module updated successfully with ID: {}", updatedModule.getId());
+		return moduleMapper.toDto(updatedModule);
+	}
+}
+
+// src/main/java/com/spacedlearning/mapper/UserMapper.java
+/**
+ * Mapper for User entity and DTOs
+ */
+@Component
+@RequiredArgsConstructor
+public class UserMapper extends AbstractGenericMapper<User, UserResponse> {
+    private final PasswordEncoder passwordEncoder;
+    /**
+     * Converts a list of User entities to UserResponse DTOs
+     *
+     * @param users List of User entities
+     * @return List of UserResponse DTOs
+     */
+    public List<UserResponse> convertToUserResponses(final List<User> users) {
+        if (CollectionUtils.isEmpty(users)) {
+            return Collections.emptyList();
+        }
+        return users.stream()
+            .filter(Objects::nonNull)
+            .map(this::toDto)
+            .collect(Collectors.toList());
+    }
+    /**
+	 * Creates a display name from first and last name
+	 * 
+	 * @param firstName First name
+	 * @param lastName  Last name
+	 * @return Display name
+	 */
+    private String createDisplayName(final String firstName, final String lastName) {
+		final String firstNameValue = StringUtils.defaultIfBlank(firstName, "");
+		final String lastNameValue = StringUtils.defaultIfBlank(lastName, "");
+		return (firstNameValue + " " + lastNameValue).trim();
+    }
+    /**
+     * Loads UserDetails by username from the user entity
+     *
+     * @param username the username (email) to lookup
+     * @return UserDetails object
+     */
+    public UserDetails loadUserByUsername(final String username) {
+        Objects.requireNonNull(username, "Username must not be null");
+        return null;
+    }
+    @Override
+    protected User mapDtoToEntity(final UserResponse dto, final User entity) {
+        Objects.requireNonNull(entity, "User entity must not be null");
+        if (dto == null) {
+            return entity;
+        }
+        if (StringUtils.isNotBlank(dto.getDisplayName())) {
+            entity.setName(dto.getDisplayName());
+        }
+        return entity;
+    }
+    @Override
+    protected UserResponse mapToDto(final User entity) {
+        if (entity == null) {
+            return null;
+        }
+        final List<String> roles = entity.getRoles() != null
+            ? entity.getRoles().stream()
+                .map(Role::getName)
+                .collect(Collectors.toList())
+            : Collections.emptyList();
+        return UserResponse.builder()
+                .id(entity.getId())
+                .email(entity.getEmail())
+                .displayName(entity.getName())
+                .createdAt(entity.getCreatedAt())
+                .roles(roles)
+                .build();
+    }
+	@Override
+    protected User mapToEntity(final UserResponse dto) {
+        if (dto == null) {
+            return null;
+        }
+        final User user = new User();
+        user.setEmail(dto.getEmail());
+        user.setName(dto.getDisplayName());
+        return user;
+    }
+    /**
+     * Maps a RegisterRequest DTO to a User entity
+     *
+     * @param request The RegisterRequest DTO
+     * @return User entity
+     */
+    public User registerRequestToEntity(final RegisterRequest request) {
+        Objects.requireNonNull(request, "Register request must not be null");
+        Objects.requireNonNull(request.getEmail(), "Email must not be null");
+        Objects.requireNonNull(request.getPassword(), "Password must not be null");
+        final User user = new User();
+        user.setEmail(request.getEmail());
+        user.setName(createDisplayName(request.getFirstName(), request.getLastName()));
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
+        return user;
+    }
+	/**
+	 * Maps a User entity to a UserDetailedResponse DTO (admin view)
+	 *
+	 * @param entity The User entity
+	 * @return UserDetailedResponse DTO
+	 */
+	public UserDetailedResponse toDetailedDto(final User entity) {
+        if (entity == null) {
+            return null;
+        }
+        return UserDetailedResponse.builder()
+                .id(entity.getId())
+                .email(entity.getEmail())
+                .displayName(entity.getName())
+                .createdAt(entity.getCreatedAt())
+                .updatedAt(entity.getUpdatedAt())
+                .deletedAt(entity.getDeletedAt())
+                .build();
+    }
+    /**
+     * Converts a User entity to CustomUserDetails
+     *
+     * @param user the user entity
+     * @return CustomUserDetails
+     */
+	public CustomUserDetails toUserDetails(final User user) {
+        if (user == null) {
+            return null;
+        }
+        final List<SimpleGrantedAuthority> authorities = user.getRoles().stream()
+                .map(role -> new SimpleGrantedAuthority(role.getName()))
+                .collect(Collectors.toList());
+        return new CustomUserDetails(user, authorities);
+    }
+    /**
+     * Updates a User entity from a UserUpdateRequest DTO
+     *
+     * @param request The UserUpdateRequest DTO
+     * @param entity The User entity to update
+     * @return Updated User entity
+     */
+	public User updateFromDto(final UserUpdateRequest request, final User entity) {
+        if (request == null || entity == null) {
+            return entity;
+        }
+        if (StringUtils.isNotBlank(request.getDisplayName())) {
+            entity.setName(request.getDisplayName());
+        }
+        if (StringUtils.isNotBlank(request.getPassword())) {
+            entity.setPassword(passwordEncoder.encode(request.getPassword()));
+        }
+        return entity;
+    }
+}
+
+// src/main/java/com/spacedlearning/mapper/ModuleProgressMapper.java
+/**
+ * Mapper for ModuleProgress entity and DTOs
+ */
+@Component
+@RequiredArgsConstructor
+public class ModuleProgressMapper extends AbstractGenericMapper<ModuleProgress, ModuleProgressDetailResponse> {
+	private final RepetitionMapper repetitionMapper;
+	@Override
+	protected ModuleProgress mapDtoToEntity(final ModuleProgressDetailResponse dto, final ModuleProgress entity) {
+		if (dto == null || entity == null) {
+			return entity;
+		}
+        if (dto.getFirstLearningDate() != null) {
+            entity.setFirstLearningDate(dto.getFirstLearningDate());
+        }
+        if (dto.getCyclesStudied() != null) {
+            entity.setCyclesStudied(dto.getCyclesStudied());
+        }
+        if (dto.getNextStudyDate() != null) {
+            entity.setNextStudyDate(dto.getNextStudyDate());
+        }
+        if (dto.getPercentComplete() != null) {
+            entity.setPercentComplete(dto.getPercentComplete());
+        }
+        return entity;
+    }
+	@Override
+	protected ModuleProgressDetailResponse mapToDto(final ModuleProgress entity) {
+		if (entity == null) {
+			return null;
+		}
+		final List<RepetitionResponse> repetitions = repetitionMapper.toDtoList(entity.getRepetitions());
+		return ModuleProgressDetailResponse.builder().id(entity.getId()).moduleId(entity.getModule().getId())
+				.moduleTitle(entity.getModule().getTitle()).userId(entity.getUser().getId())
+				.userName(entity.getUser().getName()).firstLearningDate(entity.getFirstLearningDate())
+				.cyclesStudied(entity.getCyclesStudied()).nextStudyDate(entity.getNextStudyDate())
+				.percentComplete(entity.getPercentComplete()).createdAt(entity.getCreatedAt())
+				.updatedAt(entity.getUpdatedAt()).repetitions(repetitions).build();
+	}
+	@Override
+	protected ModuleProgress mapToEntity(final ModuleProgressDetailResponse dto) {
+		if (dto == null) {
+			return null;
+		}
+		final ModuleProgress progress = new ModuleProgress();
+		progress.setFirstLearningDate(dto.getFirstLearningDate());
+		progress.setCyclesStudied(dto.getCyclesStudied());
+		progress.setNextStudyDate(dto.getNextStudyDate());
+		progress.setPercentComplete(dto.getPercentComplete());
+		progress.setRepetitions(new ArrayList<>());
+		return progress;
+	}
+	/**
+	 * Maps a ModuleProgressCreateRequest DTO to a ModuleProgress entity
+	 * 
+	 * @param request The ModuleProgressCreateRequest DTO
+	 * @param module  The Module entity
+	 * @param user    The User entity
+	 * @return ModuleProgress entity
+	 */
+	public ModuleProgress toEntity(final ModuleProgressCreateRequest request, final Module module, final User user) {
+		if (request == null) {
+			return null;
+		}
+		Objects.requireNonNull(module, "Module must not be null");
+		Objects.requireNonNull(user, "User must not be null");
+		final ModuleProgress progress = new ModuleProgress();
+		progress.setModule(module);
+		progress.setUser(user);
+		progress.setFirstLearningDate(request.getFirstLearningDate());
+		progress.setCyclesStudied(Optional.ofNullable(request.getCyclesStudied()).orElse(progress.getCyclesStudied()));
+		progress.setNextStudyDate(request.getNextStudyDate());
+		progress.setPercentComplete(
+				Optional.ofNullable(request.getPercentComplete()).orElse(progress.getPercentComplete()));
+		progress.setRepetitions(new ArrayList<>());
+		return progress;
+	}
+	/**
+	 * Maps a ModuleProgress entity to a ModuleProgressSummaryResponse DTO
+	 * 
+	 * @param entity The ModuleProgress entity
+	 * @return ModuleProgressSummaryResponse DTO
+	 */
+	public ModuleProgressSummaryResponse toSummaryDto(final ModuleProgress entity) {
+		if (entity == null) {
+			return null;
+		}
+		return ModuleProgressSummaryResponse.builder().id(entity.getId()).moduleId(entity.getModule().getId())
+				.userId(entity.getUser().getId()).firstLearningDate(entity.getFirstLearningDate())
+				.cyclesStudied(entity.getCyclesStudied()).nextStudyDate(entity.getNextStudyDate())
+				.percentComplete(entity.getPercentComplete()).createdAt(entity.getCreatedAt())
+				.updatedAt(entity.getUpdatedAt()).repetitionCount(CollectionUtils.size(entity.getRepetitions()))
+				.build();
+	}
+	/**
+	 * Maps a list of ModuleProgress entities to a list of
+	 * ModuleProgressSummaryResponse DTOs
+	 * 
+	 * @param entities The ModuleProgress entities
+	 * @return List of ModuleProgressSummaryResponse DTOs
+	 */
+	public List<ModuleProgressSummaryResponse> toSummaryDtoList(final List<ModuleProgress> entities) {
+		if (CollectionUtils.isEmpty(entities)) {
+			return Collections.emptyList();
+		}
+		return entities.stream().filter(Objects::nonNull).map(this::toSummaryDto).toList();
+	}
+	/**
+	 * Updates a ModuleProgress entity from a ModuleProgressUpdateRequest DTO
+	 * 
+	 * @param request The ModuleProgressUpdateRequest DTO
+	 * @param entity  The ModuleProgress entity to update
+	 * @return Updated ModuleProgress entity
+	 */
+	public ModuleProgress updateFromDto(final ModuleProgressUpdateRequest request, final ModuleProgress entity) {
+		if (request == null || entity == null) {
+			return entity;
+		}
+		if (request.getFirstLearningDate() != null) {
+			entity.setFirstLearningDate(request.getFirstLearningDate());
+		}
+		if (request.getCyclesStudied() != null) {
+			entity.setCyclesStudied(request.getCyclesStudied());
+		}
+		if (request.getNextStudyDate() != null) {
+			entity.setNextStudyDate(request.getNextStudyDate());
+		}
+		if (request.getPercentComplete() != null) {
+			entity.setPercentComplete(request.getPercentComplete());
+		}
+		return entity;
+	}
+}
+
+// src/main/java/com/spacedlearning/controller/BookController.java
+/**
+ * REST controller for Book operations
+ */
+@RestController
+@RequestMapping("/api/v1/books")
+@RequiredArgsConstructor
+@Slf4j
+@Tag(name = "Book API", description = "Endpoints for managing books")
+public class BookController {
+	private final BookService bookService;
+	@PostMapping
+	@PreAuthorize("hasRole('ADMIN')")
+	@Operation(summary = "Create book", description = "Creates a new book")
+	public ResponseEntity<DataResponse<BookDetailResponse>> createBook(@Valid @RequestBody BookCreateRequest request) {
+		log.debug("REST request to create book: {}", request);
+		final BookDetailResponse createdBook = bookService.create(request);
+		return ResponseEntity.status(HttpStatus.CREATED).body(DataResponse.of(createdBook));
+	}
+	@DeleteMapping("/{id}")
+	@PreAuthorize("hasRole('ADMIN')")
+	@Operation(summary = "Delete book", description = "Deletes a book by ID")
+	public ResponseEntity<SuccessResponse> deleteBook(@PathVariable UUID id) {
+		log.debug("REST request to delete book with ID: {}", id);
+		bookService.delete(id);
+		return ResponseEntity.ok(SuccessResponse.of("Book deleted successfully"));
+	}
+	@GetMapping("/filter")
+	@Operation(summary = "Filter books", description = "Filters books by status, difficulty level, and category")
+	public ResponseEntity<PageResponse<BookSummaryResponse>> filterBooks(
+			@RequestParam(required = false) BookStatus status,
+			@RequestParam(required = false) DifficultyLevel difficultyLevel,
+			@RequestParam(required = false) String category, @PageableDefault(size = 20) Pageable pageable) {
+		log.debug("REST request to filter books - status: {}, difficultyLevel: {}, category: {}, pageable: {}", status,
+				difficultyLevel, category, pageable);
+		final Page<BookSummaryResponse> page = bookService.findByFilters(status, difficultyLevel, category, pageable);
+		return ResponseEntity.ok(PageUtils.createPageResponse(page, pageable));
+	}
+	@GetMapping
+	@Operation(summary = "Get all books", description = "Retrieves a paginated list of all books")
+	public ResponseEntity<PageResponse<BookSummaryResponse>> getAllBooks(
+			@PageableDefault(size = 20) Pageable pageable) {
+		log.debug("REST request to get all books, pageable: {}", pageable);
+		final Page<BookSummaryResponse> page = bookService.findAll(pageable);
+		return ResponseEntity.ok(PageUtils.createPageResponse(page, pageable));
+	}
+	@GetMapping("/categories")
+	@Operation(summary = "Get all categories", description = "Retrieves a list of all unique book categories")
+	public ResponseEntity<DataResponse<List<String>>> getAllCategories() {
+		log.debug("REST request to get all book categories");
+		final List<String> categories = bookService.getAllCategories();
+		return ResponseEntity.ok(DataResponse.of(categories));
+	}
+	@GetMapping("/{id}")
+	@Operation(summary = "Get book by ID", description = "Retrieves a book by its ID with detailed information")
+	public ResponseEntity<DataResponse<BookDetailResponse>> getBook(@PathVariable UUID id) {
+		log.debug("REST request to get book with ID: {}", id);
+		final BookDetailResponse book = bookService.findById(id);
+		return ResponseEntity.ok(DataResponse.of(book));
+	}
+	@GetMapping("/search")
+    @Operation(summary = "Search books", description = "Searches books by name")
+    public ResponseEntity<PageResponse<BookSummaryResponse>> searchBooks(
+            @RequestParam String query,
+            @PageableDefault(size = 20) Pageable pageable) {
+        log.debug("REST request to search books with query: {}, pageable: {}", query, pageable);
+        final Page<BookSummaryResponse> page = bookService.searchByName(query, pageable);
+        return ResponseEntity.ok(PageUtils.createPageResponse(page, pageable));
+    }
+	@PutMapping("/{id}")
+	@PreAuthorize("hasRole('ADMIN')")
+	@Operation(summary = "Update book", description = "Updates an existing book")
+	public ResponseEntity<DataResponse<BookDetailResponse>> updateBook(@PathVariable UUID id,
+			@Valid @RequestBody BookUpdateRequest request) {
+		log.debug("REST request to update book with ID: {}, request: {}", id, request);
+		final BookDetailResponse updatedBook = bookService.update(id, request);
+		return ResponseEntity.ok(DataResponse.of(updatedBook));
+	}
+}
+
+// src/main/java/com/spacedlearning/controller/ModuleController.java
+/**
+ * REST controller for Module operations
+ */
+@RestController
+@RequestMapping("/api/v1/modules")
+@RequiredArgsConstructor
+@Slf4j
+@Tag(name = "Module API", description = "Endpoints for managing modules")
+public class ModuleController {
+	private final ModuleService moduleService;
+	@PostMapping
+	@PreAuthorize("hasRole('ADMIN')")
+	@Operation(summary = "Create module", description = "Creates a new module")
+	public ResponseEntity<DataResponse<ModuleDetailResponse>> createModule(
+			@Valid @RequestBody ModuleCreateRequest request) {
+		log.debug("REST request to create module: {}", request);
+		final ModuleDetailResponse createdModule = moduleService.create(request);
+		return ResponseEntity.status(HttpStatus.CREATED).body(DataResponse.of(createdModule));
+	}
+	@DeleteMapping("/{id}")
+	@PreAuthorize("hasRole('ADMIN')")
+	@Operation(summary = "Delete module", description = "Deletes a module by ID")
+	public ResponseEntity<SuccessResponse> deleteModule(@PathVariable UUID id) {
+		log.debug("REST request to delete module with ID: {}", id);
+		moduleService.delete(id);
+		return ResponseEntity.ok(SuccessResponse.of("Module deleted successfully"));
+	}
+	@GetMapping
+	@Operation(summary = "Get all modules", description = "Retrieves a paginated list of all modules")
+	public ResponseEntity<PageResponse<ModuleSummaryResponse>> getAllModules(
+			@PageableDefault(size = 20) Pageable pageable) {
+		log.debug("REST request to get all modules, pageable: {}", pageable);
+		final Page<ModuleSummaryResponse> page = moduleService.findAll(pageable);
+		return ResponseEntity.ok(PageUtils.createPageResponse(page, pageable));
+	}
+	@GetMapping("/book/{bookId}/all")
+	@Operation(summary = "Get all modules by book ID", description = "Retrieves a list of all modules for a book")
+	public ResponseEntity<DataResponse<List<ModuleSummaryResponse>>> getAllModulesByBookId(@PathVariable UUID bookId) {
+		log.debug("REST request to get all modules by book ID: {}", bookId);
+		final List<ModuleSummaryResponse> modules = moduleService.findAllByBookId(bookId);
+		return ResponseEntity.ok(DataResponse.of(modules));
+	}
+	@GetMapping("/{id}")
+	@Operation(summary = "Get module by ID", description = "Retrieves a module by its ID with detailed information")
+	public ResponseEntity<DataResponse<ModuleDetailResponse>> getModule(@PathVariable UUID id) {
+		log.debug("REST request to get module with ID: {}", id);
+		final ModuleDetailResponse module = moduleService.findById(id);
+		return ResponseEntity.ok(DataResponse.of(module));
+	}
+	@GetMapping("/book/{bookId}")
+	@Operation(summary = "Get modules by book ID", description = "Retrieves a paginated list of modules for a book")
+	public ResponseEntity<PageResponse<ModuleSummaryResponse>> getModulesByBookId(@PathVariable UUID bookId,
+			@PageableDefault(size = 20) Pageable pageable) {
+		log.debug("REST request to get modules by book ID: {}, pageable: {}", bookId, pageable);
+		final Page<ModuleSummaryResponse> page = moduleService.findByBookId(bookId, pageable);
+		return ResponseEntity.ok(PageUtils.createPageResponse(page, pageable));
+	}
+	@GetMapping("/book/{bookId}/next-number")
+ @PreAuthorize("hasRole('ADMIN')")
+ @Operation(summary = "Get next module number", description = "Gets the next available module number for a book")
+ public ResponseEntity<DataResponse<Integer>> getNextModuleNumber(@PathVariable UUID bookId) {
+     log.debug("REST request to get next module number for book ID: {}", bookId);
+     final Integer nextNumber = moduleService.getNextModuleNumber(bookId);
+     return ResponseEntity.ok(DataResponse.of(nextNumber));
+ }
+	@PutMapping("/{id}")
+	@PreAuthorize("hasRole('ADMIN')")
+	@Operation(summary = "Update module", description = "Updates an existing module")
+	public ResponseEntity<DataResponse<ModuleDetailResponse>> updateModule(@PathVariable UUID id,
+			@Valid @RequestBody ModuleUpdateRequest request) {
+		log.debug("REST request to update module with ID: {}, request: {}", id, request);
+		final ModuleDetailResponse updatedModule = moduleService.update(id, request);
+		return ResponseEntity.ok(DataResponse.of(updatedModule));
+	}
+}
+
+// src/main/java/com/spacedlearning/service/impl/BookServiceImpl.java
+/**
+ * Implementation of BookService
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class BookServiceImpl implements BookService {
+	private final BookRepository bookRepository;
+	private final BookMapper bookMapper;
+	private final MessageSource messageSource;
+	@Override
+	@Transactional
+	public BookDetailResponse create(final BookCreateRequest request) {
+		Objects.requireNonNull(request, "Book create request must not be null");
+		Objects.requireNonNull(request.getName(), "Book name must not be null");
+		log.debug("Creating new book: {}", request);
+		final Book book = bookMapper.toEntity(request);
+		final Book savedBook = bookRepository.save(book);
+		log.info("Book created successfully with ID: {}", savedBook.getId());
+		return bookMapper.toDto(savedBook);
+	}
+	@Override
+	@Transactional
+	@CacheEvict(value = "books", key = "#id")
+	public void delete(final UUID id) {
+		Objects.requireNonNull(id, "Book ID must not be null");
+		log.debug("Deleting book with ID: {}", id);
+		final Book book = bookRepository.findById(id)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound(messageSource, "resource.book", id));
+		book.softDelete(); // Use soft delete
+		bookRepository.save(book);
+		log.info("Book soft deleted successfully with ID: {}", id);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public Page<BookSummaryResponse> findAll(final Pageable pageable) {
+		Objects.requireNonNull(pageable, "Pageable must not be null");
+		log.debug("Finding all books with pagination: {}", pageable);
+		return bookRepository.findAll(pageable).map(bookMapper::toSummaryDto);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public Page<BookSummaryResponse> findByFilters(final BookStatus status, final DifficultyLevel difficultyLevel,
+			final String category, final Pageable pageable) {
+		Objects.requireNonNull(pageable, "Pageable must not be null");
+		log.debug("Finding books by filters - status: {}, difficultyLevel: {}, category: {}, pageable: {}", status,
+				difficultyLevel, category, pageable);
+		return bookRepository.findBooksByFilters(status, difficultyLevel, category, pageable)
+				.map(bookMapper::toSummaryDto);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	@Cacheable(value = "books", key = "#id")
+	public BookDetailResponse findById(final UUID id) {
+		Objects.requireNonNull(id, "Book ID must not be null");
+		log.debug("Finding book by ID: {}", id);
+		return bookRepository.findWithModulesById(id).map(bookMapper::toDto)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound(messageSource, "resource.book", id));
+	}
+	@Override
+	@Transactional(readOnly = true)
+	@Cacheable(value = "bookCategories")
+	public List<String> getAllCategories() {
+		log.debug("Getting all book categories");
+		return bookRepository.findAllCategories();
+	}
+	@Override
+    @Transactional(readOnly = true)
+	public Page<BookSummaryResponse> searchByName(final String searchTerm, final Pageable pageable) {
+		Objects.requireNonNull(pageable, "Pageable must not be null");
+        log.debug("Searching books by name containing: {}", searchTerm);
+        if (StringUtils.isBlank(searchTerm)) {
+            return findAll(pageable);
+        }
+        return bookRepository.findByNameContainingIgnoreCase(searchTerm, pageable)
+                .map(bookMapper::toSummaryDto);
+    }
+	@Override
+	@Transactional
+	@CacheEvict(value = "books", key = "#id")
+	public BookDetailResponse update(final UUID id, final BookUpdateRequest request) {
+		Objects.requireNonNull(id, "Book ID must not be null");
+		Objects.requireNonNull(request, "Book update request must not be null");
+		log.debug("Updating book with ID: {}, request: {}", id, request);
+		final Book book = bookRepository.findById(id)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound(messageSource, "resource.book", id));
+		bookMapper.updateFromDto(request, book);
+		final Book updatedBook = bookRepository.save(book);
+		log.info("Book updated successfully with ID: {}", updatedBook.getId());
+		return bookMapper.toDto(updatedBook);
+	}
+}
+
+// src/main/java/com/spacedlearning/mapper/BookMapper.java
+/**
+ * Mapper for Book entity and DTOs
+ */
+@Component
+@RequiredArgsConstructor
+public class BookMapper extends AbstractGenericMapper<Book, BookDetailResponse> {
+	private final ModuleMapper moduleMapper;
+	@Override
+	protected Book mapDtoToEntity(final BookDetailResponse dto, final Book entity) {
+		if (dto == null || entity == null) {
+			return entity;
+		}
+        if (StringUtils.isNotBlank(dto.getName())) {
+            entity.setName(dto.getName());
+        }
+		entity.setDescription(dto.getDescription());
+        if (dto.getStatus() != null) {
+            entity.setStatus(dto.getStatus());
+        }
+        if (dto.getDifficultyLevel() != null) {
+            entity.setDifficultyLevel(dto.getDifficultyLevel());
+        }
+        if (StringUtils.isNotBlank(dto.getCategory())) {
+            entity.setCategory(dto.getCategory());
+        }
+        return entity;
+    }
+	@Override
+	protected BookDetailResponse mapToDto(final Book entity) {
+		if (entity == null) {
+			return null;
+		}
+		final List<ModuleDetailResponse> modules = moduleMapper.toDtoList(entity.getModules());
+		return BookDetailResponse.builder().id(entity.getId()).name(entity.getName())
+				.description(entity.getDescription()).status(entity.getStatus())
+				.difficultyLevel(entity.getDifficultyLevel()).category(entity.getCategory())
+				.createdAt(entity.getCreatedAt()).updatedAt(entity.getUpdatedAt()).modules(modules).build();
+	}
+	@Override
+	protected Book mapToEntity(final BookDetailResponse dto) {
+		if (dto == null) {
+			return null;
+		}
+		final Book book = new Book();
+		book.setName(dto.getName());
+		book.setDescription(dto.getDescription());
+		book.setStatus(dto.getStatus());
+		book.setDifficultyLevel(dto.getDifficultyLevel());
+		book.setCategory(dto.getCategory());
+		return book;
+	}
+	/**
+	 * Maps a BookCreateRequest DTO to a Book entity
+	 *
+	 * @param request The BookCreateRequest DTO
+	 * @return Book entity
+	 */
+	public Book toEntity(final BookCreateRequest request) {
+		if (request == null) {
+			return null;
+		}
+		final Book book = new Book();
+		book.setName(request.getName());
+		book.setDescription(request.getDescription());
+		book.setStatus(Optional.ofNullable(request.getStatus()).orElse(book.getStatus()));
+		book.setDifficultyLevel(request.getDifficultyLevel());
+		book.setCategory(request.getCategory());
+		book.setModules(new ArrayList<>());
+		return book;
+	}
+	/**
+	 * Maps a Book entity to a BookSummaryResponse DTO
+	 *
+	 * @param entity The Book entity
+	 * @return BookSummaryResponse DTO
+	 */
+	public BookSummaryResponse toSummaryDto(final Book entity) {
+		if (entity == null) {
+			return null;
+		}
+		return BookSummaryResponse.builder().id(entity.getId()).name(entity.getName()).status(entity.getStatus())
+				.difficultyLevel(entity.getDifficultyLevel()).category(entity.getCategory())
+				.createdAt(entity.getCreatedAt()).updatedAt(entity.getUpdatedAt())
+				.moduleCount(entity.getModules() != null ? entity.getModules().size() : 0).build();
+	}
+	/**
+	 * Maps a list of Book entities to a list of BookSummaryResponse DTOs
+	 *
+	 * @param entities The Book entities
+	 * @return List of BookSummaryResponse DTOs
+	 */
+	public List<BookSummaryResponse> toSummaryDtoList(final List<Book> entities) {
+		if (CollectionUtils.isEmpty(entities)) {
+			return Collections.emptyList();
+		}
+		return entities.stream().filter(Objects::nonNull).map(this::toSummaryDto).toList();
+	}
+	/**
+	 * Updates a Book entity from a BookUpdateRequest DTO
+	 *
+	 * @param request The BookUpdateRequest DTO
+	 * @param entity  The Book entity to update
+	 * @return Updated Book entity
+	 */
+	public Book updateFromDto(final BookUpdateRequest request, final Book entity) {
+		if (request == null || entity == null) {
+			return entity;
+		}
+		if (StringUtils.isNotBlank(request.getName())) {
+			entity.setName(request.getName());
+		}
+		entity.setDescription(request.getDescription());
+		if (request.getStatus() != null) {
+			entity.setStatus(request.getStatus());
+		}
+		if (request.getDifficultyLevel() != null) {
+			entity.setDifficultyLevel(request.getDifficultyLevel());
+		}
+		if (StringUtils.isNotBlank(request.getCategory())) {
+			entity.setCategory(request.getCategory());
+		}
+		return entity;
+	}
+}
+
+// src/main/java/com/spacedlearning/service/impl/UserServiceImpl.java
+/**
+ * Implementation of UserService
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class UserServiceImpl implements UserService {
+	private final UserRepository userRepository;
+	private final UserMapper userMapper;
+	private final CustomUserDetailsService userDetailsService;
+	@Override
+	@Transactional
+	public void delete(UUID id) {
+		log.debug("Deleting user with ID: {}", id);
+		final User user = userRepository.findById(id)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound("User", id));
+		user.softDelete(); // Use soft delete
+		userRepository.save(user);
+		log.info("User soft deleted successfully with ID: {}", id);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public boolean existsByEmail(String email) {
+		return userRepository.existsByEmail(email);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public Page<UserDetailedResponse> findAll(Pageable pageable) {
+		log.debug("Finding all users with pagination: {}", pageable);
+		return userRepository.findAll(pageable).map(userMapper::toDetailedDto);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public UserResponse findByEmail(String email) {
+		log.debug("Finding user by email: {}", email);
+		final User user = userRepository.findByEmail(email)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound("User with email " + email, null));
+		return userMapper.toDto(user);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public UserDetailedResponse findById(UUID id) {
+		log.debug("Finding user by ID: {}", id);
+		final User user = userRepository.findById(id)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound("User", id));
+		return userMapper.toDetailedDto(user);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public UserResponse getCurrentUser() {
+		final Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+		if (authentication == null || !authentication.isAuthenticated()) {
+			throw SpacedLearningException.forbidden("User not authenticated");
+		}
+		final String email = authentication.getName();
+		log.debug("Getting current user with email: {}", email);
+		return findByEmail(email);
+	}
+	@Override
+	@Transactional(readOnly = true)
+	public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+		log.debug("Loading user details by username: {}", username);
+		return userDetailsService.loadUserByUsername(username);
+	}
+	@Override
+    @Transactional
+    public UserResponse restore(UUID id) {
+        log.debug("Restoring user with ID: {}", id);
+        final User user = userRepository.findById(id)
+                .orElseThrow(() -> SpacedLearningException.resourceNotFound("User", id));
+        if (!user.isDeleted()) {
+            log.info("User with ID: {} is not deleted, no restoration needed", id);
+            return userMapper.toDto(user);
+        }
+        user.restore();
+        final User restoredUser = userRepository.save(user);
+        log.info("User restored successfully with ID: {}", restoredUser.getId());
+        return userMapper.toDto(restoredUser);
+    }
+	@Override
+	@Transactional
+	public UserResponse update(UUID id, UserUpdateRequest request) {
+		log.debug("Updating user with ID: {}, request: {}", id, request);
+		final User user = userRepository.findById(id)
+				.orElseThrow(() -> SpacedLearningException.resourceNotFound("User", id));
+		userMapper.updateFromDto(request, user);
+		final User updatedUser = userRepository.save(user);
+		log.info("User updated successfully with ID: {}", updatedUser.getId());
+		return userMapper.toDto(updatedUser);
+	}
+}
+
+// src/main/java/com/spacedlearning/util/PageUtils.java
+/**
+ * Utility class for handling pagination operations. Provides methods to convert
+ * Spring Data Page objects to PageResponse DTOs.
+ */
+public class PageUtils {
+	/**
+	 * Creates a PageResponse from a list of items, total count, pageable and
+	 * mapping function. Useful for scenarios where you need to manually handle
+	 * pagination logic.
+	 *
+	 * @param <T>           The source item type
+	 * @param <R>           The target DTO type
+	 * @param content       The list of source items
+	 * @param totalElements Total number of elements
+	 * @param pageable      The Pageable object with pagination information
+	 * @param mapper        The function to map from source to target type
+	 * @return A PageResponse containing the mapped items
+	 */
+	public static <T, R> PageResponse<R> createPageResponse(final List<T> content, final long totalElements,
+			final Pageable pageable, final Function<T, R> mapper) {
+		Objects.requireNonNull(content, "Content must not be null");
+		Objects.requireNonNull(pageable, "Pageable must not be null");
+		Objects.requireNonNull(mapper, "Mapper function must not be null");
+		final List<R> mappedContent = CollectionUtils.emptyIfNull(content).stream().filter(Objects::nonNull).map(mapper)
+				.collect(Collectors.toList());
+		final int totalPages = pageable.getPageSize() > 0
+				? (int) Math.ceil((double) totalElements / pageable.getPageSize())
+				: 0;
+		return PageResponse.<R>builder().content(mappedContent).page(pageable.getPageNumber())
+				.size(pageable.getPageSize()).totalElements(totalElements).totalPages(totalPages)
+				.first(pageable.getPageNumber() == 0).last(pageable.getPageNumber() >= totalPages - 1).build();
+	}
+	/**
+	 * Creates a PageResponse directly from a Spring Data Page of DTOs.
+	 *
+	 * @param <R>      The DTO type
+	 * @param page     The Spring Data Page object already containing DTOs
+	 * @param pageable The Pageable object used for the query
+	 * @return A PageResponse containing the DTOs
+	 */
+	public static <R> PageResponse<R> createPageResponse(final Page<R> page, final Pageable pageable) {
+		Objects.requireNonNull(page, "Page must not be null");
+		Objects.requireNonNull(pageable, "Pageable must not be null");
+		return PageResponse.<R>builder().content(page.getContent()).page(pageable.getPageNumber())
+				.size(pageable.getPageSize()).totalElements(page.getTotalElements()).totalPages(page.getTotalPages())
+				.first(page.isFirst()).last(page.isLast()).build();
+	}
+	/**
+	 * Creates a PageResponse from a Spring Data Page and a mapping function.
+	 *
+	 * @param <T>    The entity type
+	 * @param <R>    The DTO type
+	 * @param page   The Spring Data Page object
+	 * @param mapper The function to map from entity to DTO
+	 * @return A PageResponse containing the mapped DTOs
+	 */
+	public static <T, R> PageResponse<R> createPageResponse(final Page<T> page, final Function<T, R> mapper) {
+		Objects.requireNonNull(page, "Page must not be null");
+		Objects.requireNonNull(mapper, "Mapper function must not be null");
+		final List<R> content = page.getContent().stream().filter(Objects::nonNull).map(mapper)
+				.collect(Collectors.toList());
+		return PageResponse.<R>builder().content(content).page(page.getNumber()).size(page.getSize())
+				.totalElements(page.getTotalElements()).totalPages(page.getTotalPages()).first(page.isFirst())
+				.last(page.isLast()).build();
+	}
+	/**
+	 * Creates an empty PageResponse.
+	 *
+	 * @param <R>      The DTO type
+	 * @param pageable The Pageable object used for the query
+	 * @return An empty PageResponse
+	 */
+	public static <R> PageResponse<R> emptyPageResponse(final Pageable pageable) {
+		Objects.requireNonNull(pageable, "Pageable must not be null");
+		return PageResponse.<R>builder().content(List.of()).page(pageable.getPageNumber()).size(pageable.getPageSize())
+				.totalElements(0L).totalPages(0).first(true).last(true).build();
+	}
+	/**
+	 * Private constructor to prevent instantiation of utility class.
+	 */
+	private PageUtils() {
+		throw new UnsupportedOperationException("Utility class should not be instantiated");
+	}
+}
+
+// src/main/java/com/spacedlearning/controller/UserController.java
+/**
+ * REST controller for User operations
+ */
+@RestController
+@RequestMapping("/api/v1/users")
+@RequiredArgsConstructor
+@Slf4j
+@Tag(name = "User API", description = "Endpoints for managing users")
+public class UserController {
+	private final UserService userService;
+	@DeleteMapping("/{id}")
+	@PreAuthorize("hasRole('ADMIN')")
+	@Operation(summary = "Delete user", description = "Deletes a user by ID")
+	public ResponseEntity<SuccessResponse> deleteUser(@PathVariable UUID id) {
+		log.debug("REST request to delete user with ID: {}", id);
+		userService.delete(id);
+		return ResponseEntity.ok(SuccessResponse.of("User deleted successfully"));
+	}
+	@GetMapping
+	@PreAuthorize("hasRole('ADMIN')")
+	@Operation(summary = "Get all users", description = "Retrieves a paginated list of all users")
+	public ResponseEntity<PageResponse<UserDetailedResponse>> getAllUsers(
+			@PageableDefault(size = 20) Pageable pageable) {
+		log.debug("REST request to get all users, pageable: {}", pageable);
+		final Page<UserDetailedResponse> page = userService.findAll(pageable);
+		return ResponseEntity.ok(PageUtils.createPageResponse(page, pageable));
+	}
+	@GetMapping("/me")
+	@Operation(summary = "Get current user", description = "Retrieves the current authenticated user")
+	public ResponseEntity<DataResponse<UserResponse>> getCurrentUser() {
+		log.debug("REST request to get current user");
+		final UserResponse user = userService.getCurrentUser();
+		return ResponseEntity.ok(DataResponse.of(user));
+	}
+	@GetMapping("/{id}")
+	@PreAuthorize("hasRole('ADMIN') or @userSecurity.isCurrentUser(#id)")
+	@Operation(summary = "Get user by ID", description = "Retrieves a user by ID")
+	public ResponseEntity<DataResponse<UserDetailedResponse>> getUserById(@PathVariable UUID id) {
+		log.debug("REST request to get user with ID: {}", id);
+		final UserDetailedResponse user = userService.findById(id);
+		return ResponseEntity.ok(DataResponse.of(user));
+	}
+	@PostMapping("/{id}/restore")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Restore user", description = "Restores a soft-deleted user")
+    public ResponseEntity<DataResponse<UserResponse>> restoreUser(@PathVariable UUID id) {
+        log.debug("REST request to restore user with ID: {}", id);
+        final UserResponse restoredUser = userService.restore(id);
+        return ResponseEntity.ok(DataResponse.of(restoredUser));
+    }
+	@PutMapping("/{id}")
+	@PreAuthorize("hasRole('ADMIN') or @userSecurity.isCurrentUser(#id)")
+	@Operation(summary = "Update user", description = "Updates an existing user")
+	public ResponseEntity<DataResponse<UserResponse>> updateUser(@PathVariable UUID id,
+			@Valid @RequestBody UserUpdateRequest request) {
+		log.debug("REST request to update user with ID: {}, request: {}", id, request);
+		final UserResponse updatedUser = userService.update(id, request);
+		return ResponseEntity.ok(DataResponse.of(updatedUser));
+	}
+}
+
+// src/main/java/com/spacedlearning/mapper/ModuleMapper.java
+/**
+ * Mapper for Module entity and DTOs
+ */
+@Component
+@RequiredArgsConstructor
+public class ModuleMapper extends AbstractGenericMapper<Module, ModuleDetailResponse> {
+	private final ModuleProgressMapper progressMapper;
+	@Override
+    protected Module mapDtoToEntity(ModuleDetailResponse dto, Module entity) {
+        if (dto.getModuleNo() != null) {
+            entity.setModuleNo(dto.getModuleNo());
+        }
+        if (StringUtils.isNotBlank(dto.getTitle())) {
+            entity.setTitle(dto.getTitle());
+        }
+        if (dto.getWordCount() != null) {
+            entity.setWordCount(dto.getWordCount());
+        }
+        return entity;
+    }
+	@Override
+	protected ModuleDetailResponse mapToDto(Module entity) {
+		final List<ModuleProgressSummaryResponse> progress = progressMapper.toSummaryDtoList(entity.getProgress());
+		return ModuleDetailResponse.builder().id(entity.getId()).bookId(entity.getBook().getId())
+				.bookName(entity.getBook().getName()).moduleNo(entity.getModuleNo()).title(entity.getTitle())
+				.wordCount(entity.getWordCount()).createdAt(entity.getCreatedAt()).updatedAt(entity.getUpdatedAt())
+				.progress(progress).build();
+	}
+	@Override
+	protected Module mapToEntity(ModuleDetailResponse dto) {
+		final Module module = new Module();
+		module.setModuleNo(dto.getModuleNo());
+		module.setTitle(dto.getTitle());
+		module.setWordCount(dto.getWordCount());
+		return module;
+	}
+	/**
+	 * Maps a ModuleCreateRequest DTO to a Module entity
+	 * 
+	 * @param request The ModuleCreateRequest DTO
+	 * @param book    The parent Book entity
+	 * @return Module entity
+	 */
+	public Module toEntity(ModuleCreateRequest request, Book book) {
+		if (request == null) {
+			return null;
+		}
+		final Module module = new Module();
+		module.setBook(book);
+		module.setModuleNo(request.getModuleNo());
+		module.setTitle(request.getTitle());
+		module.setWordCount(Optional.ofNullable(request.getWordCount()).orElse(0));
+		module.setProgress(new ArrayList<>());
+		return module;
+	}
+	/**
+	 * Maps a Module entity to a ModuleSummaryResponse DTO
+	 * 
+	 * @param entity The Module entity
+	 * @return ModuleSummaryResponse DTO
+	 */
+	public ModuleSummaryResponse toSummaryDto(Module entity) {
+		return entity != null
+				? ModuleSummaryResponse.builder().id(entity.getId()).bookId(entity.getBook().getId())
+						.moduleNo(entity.getModuleNo()).title(entity.getTitle()).wordCount(entity.getWordCount())
+						.createdAt(entity.getCreatedAt()).updatedAt(entity.getUpdatedAt()).build()
+				: null;
+	}
+	/**
+	 * Maps a list of Module entities to a list of ModuleSummaryResponse DTOs
+	 * 
+	 * @param entities The Module entities
+	 * @return List of ModuleSummaryResponse DTOs
+	 */
+	public List<ModuleSummaryResponse> toSummaryDtoList(List<Module> entities) {
+		if (entities == null) {
+			return Collections.emptyList();
+		}
+		return entities.stream().map(this::toSummaryDto).toList();
+	}
+	/**
+	 * Updates a Module entity from a ModuleUpdateRequest DTO
+	 * 
+	 * @param request The ModuleUpdateRequest DTO
+	 * @param entity  The Module entity to update
+	 * @return Updated Module entity
+	 */
+	public Module updateFromDto(ModuleUpdateRequest request, Module entity) {
+		if (request == null || entity == null) {
+			return entity;
+		}
+		if (request.getModuleNo() != null) {
+			entity.setModuleNo(request.getModuleNo());
+		}
+		if (StringUtils.isNotBlank(request.getTitle())) {
+			entity.setTitle(request.getTitle());
+		}
+		if (request.getWordCount() != null) {
+			entity.setWordCount(request.getWordCount());
+		}
+		return entity;
+	}
+}
+
+// src/main/java/com/spacedlearning/repository/ModuleProgressRepository.java
+/**
+ * Repository for ModuleProgress entity
+ */
+@Repository
+public interface ModuleProgressRepository extends JpaRepository<ModuleProgress, UUID> {
+	/**
+	 * Count progress records by user and book
+	 * 
+	 * @param userId User ID
+	 * @param bookId Book ID
+	 * @return Number of progress records
+	 */
+	@Query("SELECT COUNT(mp) FROM ModuleProgress mp WHERE mp.user.id = :userId " + "AND mp.module.book.id = :bookId")
+	long countByUserAndBook(@Param("userId") UUID userId, @Param("bookId") UUID bookId);
+	/**
+	 * Check if progress exists for user and module
+	 * 
+	 * @param userId   User ID
+	 * @param moduleId Module ID
+	 * @return true if exists, false otherwise
+	 */
+	boolean existsByUserIdAndModuleId(UUID userId, UUID moduleId);
+	/**
+	 * Find progress by module ID
+	 * 
+	 * @param moduleId Module ID
+	 * @param pageable Pagination information
+	 * @return Page of progress records
+	 */
+	Page<ModuleProgress> findByModuleId(UUID moduleId, Pageable pageable);
+	/**
+	 * Find progress records by user and book
+	 * 
+	 * @param userId   User ID
+	 * @param bookId   Book ID
+	 * @param pageable Pagination information
+	 * @return Page of progress records
+	 */
+	@Query("SELECT mp FROM ModuleProgress mp WHERE mp.user.id = :userId " + "AND mp.module.book.id = :bookId "
+			+ "ORDER BY mp.module.moduleNo ASC")
+	Page<ModuleProgress> findByUserAndBook(@Param("userId") UUID userId, @Param("bookId") UUID bookId,
+			Pageable pageable);
+	/**
+	 * Find progress by user ID
+	 * 
+	 * @param userId   User ID
+	 * @param pageable Pagination information
+	 * @return Page of progress records
+	 */
+	Page<ModuleProgress> findByUserId(UUID userId, Pageable pageable);
+	/**
+	 * Find progress by user ID and module ID
+	 * 
+	 * @param userId   User ID
+	 * @param moduleId Module ID
+	 * @return Optional containing progress record
+	 */
+	Optional<ModuleProgress> findByUserIdAndModuleId(UUID userId, UUID moduleId);
+	/**
+	 * Find progress records due for study on or before a specific date
+	 * 
+	 * @param userId    User ID
+	 * @param studyDate Study date
+	 * @param pageable  Pagination information
+	 * @return Page of progress records
+	 */
+	@Query("SELECT mp FROM ModuleProgress mp WHERE mp.user.id = :userId " + "AND mp.nextStudyDate <= :studyDate "
+			+ "ORDER BY mp.nextStudyDate ASC")
+	Page<ModuleProgress> findDueForStudy(@Param("userId") UUID userId, @Param("studyDate") LocalDate studyDate,
+			Pageable pageable);
+	/**
+	 * Find progress by ID with repetitions eagerly loaded
+	 * 
+	 * @param id Progress ID
+	 * @return Optional containing progress with repetitions
+	 */
+	@EntityGraph(attributePaths = { "repetitions" })
+	Optional<ModuleProgress> findWithRepetitionsById(UUID id);
+}
+
+// src/main/java/com/spacedlearning/controller/AuthController.java
+/**
+ * REST controller for Authentication operations
+ */
+@RestController
+@RequestMapping("/api/v1/auth")
+@RequiredArgsConstructor
+@Slf4j
+@Tag(name = "Authentication API", description = "Endpoints for authentication")
+public class AuthController {
+	private final AuthService authService;
+	@PostMapping("/login")
+	@Operation(summary = "Login", description = "Authenticates a user and returns JWT tokens")
+	public ResponseEntity<DataResponse<AuthResponse>> login(@Valid @RequestBody AuthRequest request) {
+		log.debug("REST request to login user with email: {}", request.getEmail());
+		final AuthResponse authResponse = authService.authenticate(request);
+		return ResponseEntity.ok(DataResponse.of(authResponse));
+	}
+	@PostMapping("/refresh-token")
+	@Operation(summary = "Refresh token", description = "Refreshes an authentication token")
+	public ResponseEntity<DataResponse<AuthResponse>> refreshToken(@Valid @RequestBody RefreshTokenRequest request) {
+		log.debug("REST request to refresh token");
+		final AuthResponse authResponse = authService.refreshToken(request);
+		return ResponseEntity.ok(DataResponse.of(authResponse));
+	}
+	@PostMapping("/register")
+	@Operation(summary = "Register user", description = "Registers a new user")
+	public ResponseEntity<DataResponse<UserResponse>> register(@Valid @RequestBody RegisterRequest request) {
+		log.debug("REST request to register user with email: {}", request.getEmail());
+		final UserResponse registeredUser = authService.register(request);
+		return ResponseEntity.status(HttpStatus.CREATED).body(DataResponse.of(registeredUser));
+	}
+	@GetMapping("/validate")
+	@Operation(summary = "Validate token", description = "Validates a JWT token")
+	public ResponseEntity<SuccessResponse> validateToken(@RequestParam String token) {
+		log.debug("REST request to validate token");
+		final boolean isValid = authService.validateToken(token);
+		if (isValid) {
+			return ResponseEntity.ok(SuccessResponse.of("Token is valid"));
+		}
+		return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+				.body(SuccessResponse.builder().message("Invalid token").success(false).build());
+	}
+}
+
+// src/main/java/com/spacedlearning/aop/LoggingAspect.java
+/**
+ * Aspect for logging execution of service and repository Spring components.
+ */
+@Aspect
+@Component
+@Slf4j
+public class LoggingAspect {
+	/**
+	 * Combined pointcut for services, repositories, and controllers.
+	 */
+	@Pointcut("servicePointcut() || repositoryPointcut() || controllerPointcut()")
+	public void applicationPointcut() {
+	}
+	/**
+	 * Pointcut for all controller methods.
+	 */
+	@Pointcut("within(@org.springframework.web.bind.annotation.RestController *)")
+	public void controllerPointcut() {
+	}
+	/**
+	 * Logs exceptions thrown by methods.
+	 */
+	@AfterThrowing(pointcut = "applicationPointcut()", throwing = "e")
+	public void logAfterThrowing(JoinPoint joinPoint, Throwable e) {
+		log.error("Exception in {}.{}() with cause = {}", joinPoint.getSignature().getDeclaringTypeName(),
+				joinPoint.getSignature().getName(), e.getCause() != null ? e.getCause() : "NULL");
+		if (log.isDebugEnabled()) {
+			log.debug("Exception stacktrace: ", e);
+		}
+	}
+	/**
+	 * Logs method execution time and parameters.
+	 */
+	@Around("applicationPointcut()")
+	public Object logAround(ProceedingJoinPoint joinPoint) throws Throwable {
+		if (log.isDebugEnabled()) {
+			log.debug("Enter: {}.{}() with arguments = {}", joinPoint.getSignature().getDeclaringTypeName(),
+					joinPoint.getSignature().getName(), joinPoint.getArgs());
+		}
+		try {
+			final long start = System.currentTimeMillis();
+			final Object result = joinPoint.proceed();
+			final long executionTime = System.currentTimeMillis() - start;
+			if (log.isDebugEnabled()) {
+				log.debug("Exit: {}.{}() with result = {} (execution time: {} ms)",
+						joinPoint.getSignature().getDeclaringTypeName(), joinPoint.getSignature().getName(), result,
+						executionTime);
+			}
+			if (executionTime > 500) {
+				log.warn("Slow execution: {}.{}() took {} ms", joinPoint.getSignature().getDeclaringTypeName(),
+						joinPoint.getSignature().getName(), executionTime);
+			}
+			return result;
+		} catch (final IllegalArgumentException e) {
+			log.error("Illegal argument: {} in {}.{}()", e.getMessage(),
+					joinPoint.getSignature().getDeclaringTypeName(), joinPoint.getSignature().getName());
+			throw e;
+		}
+	}
+	/**
+     * Pointcut for all repository methods.
+     */
+    @Pointcut("within(@org.springframework.stereotype.Repository *)")
+    public void repositoryPointcut() {
+    }
+	/**
+	 * Pointcut for all service methods.
+	 */
+	@Pointcut("within(@org.springframework.stereotype.Service *)")
+	public void servicePointcut() {
+	}
+}
+
+// src/main/java/com/spacedlearning/entity/ModuleProgress.java
+/**
+ * Entity representing a user's progress for a specific module.
+ */
+@Entity
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Table(name = "module_progress", schema = "spaced_learning")
+public class ModuleProgress extends BaseEntity {
+	@NotNull
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "module_id", nullable = false)
+	private Module module;
+	@NotNull
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "user_id", nullable = false)
+	private User user;
+	@Column(name = "first_learning_date")
+	private LocalDate firstLearningDate;
+	@Enumerated(EnumType.STRING)
+	@Column(name = "cycles_studied", length = 30)
+	private CycleStudied cyclesStudied = CycleStudied.FIRST_TIME;
+	@Column(name = "next_study_date")
+	private LocalDate nextStudyDate;
+	@DecimalMin("0.00")
+	@DecimalMax("100.00")
+	@Column(name = "percent_complete", precision = 5, scale = 2)
+	private BigDecimal percentComplete = BigDecimal.ZERO;
+	@OneToMany(mappedBy = "moduleProgress", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
+	private List<Repetition> repetitions = new ArrayList<>();
+	/**
+	 * Adds a repetition record to this progress and sets the bidirectional
+	 * relationship.
+	 *
+	 * @param repetition The repetition to add
+	 * @return The added repetition
+	 */
+	public Repetition addRepetition(Repetition repetition) {
+		repetitions.add(repetition);
+		repetition.setModuleProgress(this);
+		return repetition;
+	}
+	/**
+	 * Removes a repetition record from this progress.
+	 *
+	 * @param repetition The repetition to remove
+	 * @return True if the repetition was removed, false otherwise
+	 */
+	public boolean removeRepetition(Repetition repetition) {
+		final boolean removed = repetitions.remove(repetition);
+		if (removed) {
+			repetition.setModuleProgress(null);
+		}
+		return removed;
+	}
+	/**
+     * Validate dates to ensure next_study_date is after first_learning_date.
+     */
+    @PrePersist
+    @PreUpdate
+    public void validateDates() {
+        if (firstLearningDate != null && nextStudyDate != null &&
+            nextStudyDate.isBefore(firstLearningDate)) {
+            throw new IllegalStateException("Next study date must be on or after first learning date");
+        }
+    }
+}
+
+// src/main/java/com/spacedlearning/mapper/RepetitionMapper.java
+/**
+ * Mapper for Repetition entity and DTOs
+ */
+@Component
+public class RepetitionMapper extends AbstractGenericMapper<Repetition, RepetitionResponse> {
+	@Override
+	protected Repetition mapDtoToEntity(RepetitionResponse dto, Repetition entity) {
+		if (dto.getRepetitionOrder() != null) {
+			entity.setRepetitionOrder(dto.getRepetitionOrder());
+		}
+		if (dto.getStatus() != null) {
+			entity.setStatus(dto.getStatus());
+		}
+		if (dto.getReviewDate() != null) {
+			entity.setReviewDate(dto.getReviewDate());
+		}
+		return entity;
+	}
+	@Override
+	protected RepetitionResponse mapToDto(Repetition entity) {
+		return RepetitionResponse.builder().id(entity.getId()).moduleProgressId(entity.getModuleProgress().getId())
+				.repetitionOrder(entity.getRepetitionOrder()).status(entity.getStatus())
+				.reviewDate(entity.getReviewDate()).createdAt(entity.getCreatedAt()).updatedAt(entity.getUpdatedAt())
+				.build();
+	}
+	@Override
+	protected Repetition mapToEntity(RepetitionResponse dto) {
+		final Repetition repetition = new Repetition();
+		repetition.setRepetitionOrder(dto.getRepetitionOrder());
+		repetition.setStatus(dto.getStatus());
+		repetition.setReviewDate(dto.getReviewDate());
+		return repetition;
+	}
+	/**
+	 * Maps a RepetitionCreateRequest DTO to a Repetition entity
+	 * 
+	 * @param request  The RepetitionCreateRequest DTO
+	 * @param progress The ModuleProgress entity
+	 * @return Repetition entity
+	 */
+	public Repetition toEntity(RepetitionCreateRequest request, ModuleProgress progress) {
+		if (request == null) {
+			return null;
+		}
+		final Repetition repetition = new Repetition();
+		repetition.setModuleProgress(progress);
+		repetition.setRepetitionOrder(request.getRepetitionOrder());
+		repetition.setStatus(Optional.ofNullable(request.getStatus()).orElse(repetition.getStatus()));
+		repetition.setReviewDate(request.getReviewDate());
+		return repetition;
+	}
+	/**
+	 * Updates a Repetition entity from a RepetitionUpdateRequest DTO
+	 * 
+	 * @param request The RepetitionUpdateRequest DTO
+	 * @param entity  The Repetition entity to update
+	 * @return Updated Repetition entity
+	 */
+	public Repetition updateFromDto(RepetitionUpdateRequest request, Repetition entity) {
+		if (request == null || entity == null) {
+			return entity;
+		}
+		if (request.getStatus() != null) {
+			entity.setStatus(request.getStatus());
+		}
+		if (request.getReviewDate() != null) {
+			entity.setReviewDate(request.getReviewDate());
+		}
+		return entity;
+	}
+}
+
+// src/main/java/com/spacedlearning/repository/BookRepository.java
+/**
+ * Repository for Book entity
+ */
+@Repository
+public interface BookRepository extends JpaRepository<Book, UUID> {
+	/**
+	 * Find all categories from books
+	 * 
+	 * @return List of unique categories
+	 */
+	@Query("SELECT DISTINCT b.category FROM Book b WHERE b.category IS NOT NULL ORDER BY b.category")
+	List<String> findAllCategories();
+	/**
+	 * Find published books with published status and optional filtering
+	 * 
+	 * @param status          Book status (optional)
+	 * @param difficultyLevel Difficulty level (optional)
+	 * @param category        Category (optional)
+	 * @param pageable        Pagination information
+	 * @return Page of books
+	 */
+	@Query("SELECT b FROM Book b WHERE " + "(:status IS NULL OR b.status = :status) "
+			+ "AND (:difficultyLevel IS NULL OR b.difficultyLevel = :difficultyLevel) "
+			+ "AND (:category IS NULL OR b.category = :category)")
+	Page<Book> findBooksByFilters(@Param("status") BookStatus status,
+			@Param("difficultyLevel") DifficultyLevel difficultyLevel, @Param("category") String category,
+			Pageable pageable);
+	/**
+	 * Find books by category
+	 * 
+	 * @param category Category
+	 * @param pageable Pagination information
+	 * @return Page of books
+	 */
+	Page<Book> findByCategory(String category, Pageable pageable);
+	/**
+	 * Find books by difficulty level
+	 * 
+	 * @param difficultyLevel Difficulty level
+	 * @param pageable        Pagination information
+	 * @return Page of books
+	 */
+	Page<Book> findByDifficultyLevel(DifficultyLevel difficultyLevel, Pageable pageable);
+	/**
+	 * Find books by name containing the search term
+	 * 
+	 * @param searchTerm Search term
+	 * @param pageable   Pagination information
+	 * @return Page of books
+	 */
+	Page<Book> findByNameContainingIgnoreCase(String searchTerm, Pageable pageable);
+	/**
+	 * Find books by status
+	 * 
+	 * @param status   Book status
+	 * @param pageable Pagination information
+	 * @return Page of books
+	 */
+	Page<Book> findByStatus(BookStatus status, Pageable pageable);
+	/**
+	 * Find book by ID with modules eagerly loaded
+	 * 
+	 * @param id Book ID
+	 * @return Optional containing book with modules
+	 */
+	@EntityGraph(attributePaths = { "modules" })
+	Optional<Book> findWithModulesById(UUID id);
+}
+
+// src/main/java/com/spacedlearning/service/ModuleProgressService.java
+/**
+ * Service interface for ModuleProgress operations
+ */
+public interface ModuleProgressService {
+	/**
+	 * Create a new progress record
+	 * 
+	 * @param request Progress creation request
+	 * @return Created progress detail response
+	 */
+	ModuleProgressDetailResponse create(ModuleProgressCreateRequest request);
+	/**
+	 * Delete a progress record
+	 * 
+	 * @param id Progress ID
+	 */
+	void delete(UUID id);
+	/**
+	 * Find all progress records with pagination
+	 * 
+	 * @param pageable Pagination information
+	 * @return Page of progress summaries
+	 */
+	Page<ModuleProgressSummaryResponse> findAll(Pageable pageable);
+	/**
+	 * Find progress by ID
+	 * 
+	 * @param id Progress ID
+	 * @return Progress detail response
+	 */
+	ModuleProgressDetailResponse findById(UUID id);
+	/**
+	 * Find progress by module ID
+	 * 
+	 * @param moduleId Module ID
+	 * @param pageable Pagination information
+	 * @return Page of progress summaries
+	 */
+	Page<ModuleProgressSummaryResponse> findByModuleId(UUID moduleId, Pageable pageable);
+	/**
+	 * Find progress by user ID
+	 * 
+	 * @param userId   User ID
+	 * @param pageable Pagination information
+	 * @return Page of progress summaries
+	 */
+	Page<ModuleProgressSummaryResponse> findByUserId(UUID userId, Pageable pageable);
+	/**
+	 * Find progress records by user and book
+	 * 
+	 * @param userId   User ID
+	 * @param bookId   Book ID
+	 * @param pageable Pagination information
+	 * @return Page of progress summaries
+	 */
+	Page<ModuleProgressSummaryResponse> findByUserIdAndBookId(UUID userId, UUID bookId, Pageable pageable);
+	/**
+	 * Find progress by user ID and module ID
+	 * 
+	 * @param userId   User ID
+	 * @param moduleId Module ID
+	 * @return Progress detail response
+	 */
+	ModuleProgressDetailResponse findByUserIdAndModuleId(UUID userId, UUID moduleId);
+	/**
+	 * Find progress records due for study
+	 * 
+	 * @param userId    User ID
+	 * @param studyDate Date to study on or before
+	 * @param pageable  Pagination information
+	 * @return Page of progress summaries
+	 */
+	Page<ModuleProgressSummaryResponse> findDueForStudy(UUID userId, LocalDate studyDate, Pageable pageable);
+	/**
+	 * Update a progress record
+	 * 
+	 * @param id      Progress ID
+	 * @param request Progress update request
+	 * @return Updated progress detail response
+	 */
+	ModuleProgressDetailResponse update(UUID id, ModuleProgressUpdateRequest request);
+}
+
+// src/main/java/com/spacedlearning/repository/RepetitionRepository.java
+/**
+ * Repository for Repetition entity
+ */
+@Repository
+public interface RepetitionRepository extends JpaRepository<Repetition, UUID> {
+	/**
+	 * Count repetitions by module progress ID and status
+	 * 
+	 * @param moduleProgressId Module progress ID
+	 * @param status           Status
+	 * @return Number of repetitions
+	 */
+	long countByModuleProgressIdAndStatus(UUID moduleProgressId, RepetitionStatus status);
+	/**
+	 * Check if repetition exists for module progress and order
+	 * 
+	 * @param moduleProgressId Module progress ID
+	 * @param repetitionOrder  Repetition order
+	 * @return true if exists, false otherwise
+	 */
+	boolean existsByModuleProgressIdAndRepetitionOrder(UUID moduleProgressId, RepetitionOrder repetitionOrder);
+	/**
+	 * Find repetitions by module progress ID (paginated)
+	 * 
+	 * @param moduleProgressId Module progress ID
+	 * @param pageable         Pagination information
+	 * @return Page of repetitions
+	 */
+	Page<Repetition> findByModuleProgressId(UUID moduleProgressId, Pageable pageable);
+	/**
+	 * Find repetition by module progress ID and order
+	 * 
+	 * @param moduleProgressId Module progress ID
+	 * @param repetitionOrder  Repetition order
+	 * @return Optional containing repetition
+	 */
+	Optional<Repetition> findByModuleProgressIdAndRepetitionOrder(UUID moduleProgressId,
+			RepetitionOrder repetitionOrder);
+	/**
+	 * Find repetitions by module progress ID
+	 * 
+	 * @param moduleProgressId Module progress ID
+	 * @return List of repetitions
+	 */
+	List<Repetition> findByModuleProgressIdOrderByRepetitionOrder(UUID moduleProgressId);
+	/**
+	 * Find repetitions due for review on or before a specific date
+	 * 
+	 * @param userId     User ID
+	 * @param reviewDate Review date
+	 * @param status     Status to filter by
+	 * @param pageable   Pagination information
+	 * @return Page of repetitions
+	 */
+	@Query("SELECT r FROM Repetition r WHERE r.moduleProgress.user.id = :userId " + "AND r.reviewDate <= :reviewDate "
+			+ "AND r.status = :status " + "ORDER BY r.reviewDate ASC")
+	Page<Repetition> findDueRepetitions(@Param("userId") UUID userId, @Param("reviewDate") LocalDate reviewDate,
+			@Param("status") RepetitionStatus status, Pageable pageable);
+}
+
+// src/main/java/com/spacedlearning/mapper/AbstractGenericMapper.java
+/**
+ * Abstract implementation of GenericMapper that provides a base for
+ * entity-to-DTO mapping.
+ * Implements common functionality and provides a template for concrete mappers.
+ *
+ * @param <E> Entity type
+ * @param <D> DTO type
+ */
+public abstract class AbstractGenericMapper<E, D> implements GenericMapper<E, D> {
+    protected final Class<E> entityClass;
+    protected final Class<D> dtoClass;
+    /**
+     * Constructor that initializes entity and DTO class types using reflection.
+     */
+    @SuppressWarnings("unchecked")
+    protected AbstractGenericMapper() {
+		final ParameterizedType genericSuperclass = (ParameterizedType) getClass().getGenericSuperclass();
+        entityClass = (Class<E>) genericSuperclass.getActualTypeArguments()[0];
+        dtoClass = (Class<D>) genericSuperclass.getActualTypeArguments()[1];
+    }
+    /**
+     * Template method for implementing concrete partial update from DTO to existing
+     * entity.
+     *
+     * @param dto    Source DTO with updated values
+     * @param entity Target entity to update
+     * @return Updated entity
+     */
+    protected abstract E mapDtoToEntity(D dto, E entity);
+    /**
+     * Template method for implementing concrete mapping from entity to DTO.
+     *
+     * @param entity Entity to map
+     * @return Mapped DTO
+     */
+    protected abstract D mapToDto(E entity);
+    /**
+     * Template method for implementing concrete mapping from DTO to entity.
+     *
+     * @param dto DTO to map
+     * @return Mapped entity
+     */
+    protected abstract E mapToEntity(D dto);
+    /**
+     * Safely maps an entity to a DTO, handling null values.
+     *
+     * @param entity Entity to be mapped
+     * @return Mapped DTO or null if the entity is null
+     */
+    @Override
+    public D toDto(final E entity) {
+        return entity != null ? mapToDto(entity) : null;
+    }
+    /**
+     * Safely maps a DTO to an entity, handling null values.
+     *
+     * @param dto DTO to be mapped
+     * @return Mapped entity or null if the DTO is null
+     */
+    @Override
+    public E toEntity(final D dto) {
+        return dto != null ? mapToEntity(dto) : null;
+    }
+    /**
+     * Maps non-null fields from DTO to entity for updating purposes.
+     * This method should be overridden by implementations to handle specific
+     * mapping.
+     *
+     * @param dto    Source DTO with updated values
+     * @param entity Target entity to update
+     * @return Updated entity
+     */
+    @Override
+    public E updateEntityFromDto(final D dto, final E entity) {
+        Objects.requireNonNull(dto, "DTO cannot be null for entity update");
+        Objects.requireNonNull(entity, "Entity cannot be null for update");
+        return mapDtoToEntity(dto, entity);
+    }
+}
+
+// src/main/java/com/spacedlearning/security/CustomUserDetailsService.java
+/**
+ * Custom implementation of UserDetailsService. Loads user-specific data for
+ * Spring Security.
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class CustomUserDetailsService implements UserDetailsService {
+    private final UserRepository userRepository;
+    /**
+     * Builds a UserDetails object from a User entity.
+     *
+     * @param user The user entity
+     * @return A UserDetails object
+     */
+    private UserDetails buildUserDetails(User user) {
+        final List<SimpleGrantedAuthority> authorities = List.of(
+            new SimpleGrantedAuthority("ROLE_USER")
+        );
+        return new CustomUserDetails(user, authorities);
+    }
+	/**
+     * Loads a user by username (email).
+     *
+     * @param username The username (email) to load
+     * @return A UserDetails object
+     * @throws UsernameNotFoundException if the user is not found
+     * @throws SpacedLearningException if the user account is disabled
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        Objects.requireNonNull(username, "Username cannot be null");
+        log.debug("Loading user by username: {}", username);
+        final User user = userRepository.findByEmailWithRoles(username).orElseThrow(() -> {
+            log.warn("User not found with email: {}", username);
+            return new UsernameNotFoundException("User not found with email: " + username);
+        });
+        if (!UserStatus.ACTIVE.equals(user.getStatus())) {
+            log.warn("User is inactive: {}", username);
+            throw new SpacedLearningException("Account is disabled", org.springframework.http.HttpStatus.UNAUTHORIZED);
+        }
+        return buildUserDetails(user);
+    }
+}
+
+// src/main/java/com/spacedlearning/config/security/SecurityConfig.java
+/**
+ * Security configuration for the application.
+ */
+@Configuration
+@EnableWebSecurity
+@EnableMethodSecurity
+@RequiredArgsConstructor
+public class SecurityConfig {
+	private static final String[] PUBLIC_ENDPOINTS = { "/api/v1/auth/**", "/swagger-ui/**", "/v3/api-docs/**",
+			"/actuator/health", "/error" };
+	private final CustomUserDetailsService userDetailsService;
+	private final JwtAuthorizationFilter jwtAuthorizationFilter;
+    /**
+     * Creates an AuthenticationManager bean.
+     */
+    @Bean
+    AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
+		return authConfig.getAuthenticationManager();
+	}
+    /**
+     * Creates a PasswordEncoder bean for secure password hashing.
+     */
+    @Bean
+    PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder(12);
+    }
+    /**
+     * Configures the security filter chain.
+     */
+    @Bean
+    SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		return http.csrf(AbstractHttpConfigurer::disable)
+				.authorizeHttpRequests(
+						auth -> auth.requestMatchers(PUBLIC_ENDPOINTS).permitAll().anyRequest().authenticated())
+				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+				.addFilterBefore(jwtAuthorizationFilter, UsernamePasswordAuthenticationFilter.class)
+				.userDetailsService(userDetailsService).build();
+	}
+}
+
+// src/main/java/com/spacedlearning/service/RepetitionService.java
+/**
+ * Service interface for Repetition operations
+ */
+public interface RepetitionService {
+	/**
+	 * Create a new repetition
+	 * 
+	 * @param request Repetition creation request
+	 * @return Created repetition response
+	 */
+	RepetitionResponse create(RepetitionCreateRequest request);
+	/**
+	 * Create default repetition schedule for a module progress
+	 * 
+	 * @param moduleProgressId Module progress ID
+	 * @return List of created repetition responses
+	 */
+	List<RepetitionResponse> createDefaultSchedule(UUID moduleProgressId);
+	/**
+	 * Delete a repetition
+	 * 
+	 * @param id Repetition ID
+	 */
+	void delete(UUID id);
+	/**
+	 * Find all repetitions with pagination
+	 * 
+	 * @param pageable Pagination information
+	 * @return Page of repetition responses
+	 */
+	Page<RepetitionResponse> findAll(Pageable pageable);
+	/**
+	 * Find repetition by ID
+	 * 
+	 * @param id Repetition ID
+	 * @return Repetition response
+	 */
+	RepetitionResponse findById(UUID id);
+	/**
+	 * Find repetitions by module progress ID
+	 * 
+	 * @param moduleProgressId Module progress ID
+	 * @return List of repetition responses
+	 */
+	List<RepetitionResponse> findByModuleProgressId(UUID moduleProgressId);
+	/**
+	 * Find repetition by module progress ID and order
+	 * 
+	 * @param moduleProgressId Module progress ID
+	 * @param repetitionOrder  Repetition order
+	 * @return Repetition response
+	 */
+	RepetitionResponse findByModuleProgressIdAndOrder(UUID moduleProgressId, RepetitionOrder repetitionOrder);
+	/**
+	 * Find repetitions due for review
+	 * 
+	 * @param userId     User ID
+	 * @param reviewDate Date to review on or before
+	 * @param status     Status to filter by
+	 * @param pageable   Pagination information
+	 * @return Page of repetition responses
+	 */
+	Page<RepetitionResponse> findDueRepetitions(UUID userId, LocalDate reviewDate, RepetitionStatus status,
+			Pageable pageable);
+	/**
+	 * Update a repetition
+	 * 
+	 * @param id      Repetition ID
+	 * @param request Repetition update request
+	 * @return Updated repetition response
+	 */
+	RepetitionResponse update(UUID id, RepetitionUpdateRequest request);
+}
+
+// src/main/java/com/spacedlearning/entity/User.java
+/**
+ * Entity representing a user in the system.
+ */
+@Entity
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Table(name = "users", schema = "spaced_learning")
+public class User extends BaseEntity {
+	@NotBlank
+	@Size(max = 100)
+	@Column(name = "name", length = 100)
+	private String name;
+	@Email
+	@NotBlank
+	@Size(max = 100)
+	@Column(name = "email", length = 100, unique = true)
+	private String email;
+	@NotBlank
+	@Size(min = 8, max = 120)
+	@Column(name = "password", length = 120, nullable = false)
+	private String password;
+	@Enumerated(EnumType.STRING)
+    @Column(name = "status", length = 20)
+    private UserStatus status = UserStatus.ACTIVE;
+	@OneToMany(mappedBy = "user")
+    private Set<ModuleProgress> moduleProgresses = new HashSet<>();
+	@ManyToMany(fetch = FetchType.LAZY)
+	@JoinTable(name = "user_roles", joinColumns = @JoinColumn(name = "user_id"), inverseJoinColumns = @JoinColumn(name = "role_id"))
+	private Set<Role> roles = new HashSet<>();
+	/**
+	 * Add a role to this user
+	 *
+	 * @param role The role to add
+	 */
+	public void addRole(Role role) {
+		if (roles == null) {
+			roles = new HashSet<>();
+		}
+		roles.add(role);
+	}
+	/**
+	 * Check if the user has a specific role
+	 *
+	 * @param roleName The role name to check
+	 * @return true if the user has the role, false otherwise
+	 */
+	public boolean hasRole(String roleName) {
+		if (roles == null) {
+			return false;
+		}
+		return roles.stream().anyMatch(role -> role.getName().equals(roleName));
+	}
+	/**
+	 * Remove a role from this user
+	 *
+	 * @param role The role to remove
+	 * @return true if the role was removed, false if not found
+	 */
+	public boolean removeRole(Role role) {
+		if (roles == null) {
+			return false;
+		}
+		return roles.remove(role);
+	}
+}
+
+// src/main/java/com/spacedlearning/mapper/GenericMapper.java
+/**
+ * Generic mapper interface for converting between different object types.
+ * This provides standard mapping methods to convert entities to DTOs and vice
+ * versa.
+ *
+ * @param <E> Entity type
+ * @param <D> DTO type
+ */
+public interface GenericMapper<E, D> {
+    /**
+     * Maps an entity to a DTO.
+     *
+     * @param entity Entity to be mapped
+     * @return Mapped DTO object
+     */
+    D toDto(E entity);
+    /**
+     * Maps a DTO to an entity.
+     *
+     * @param dto DTO to be mapped
+     * @return Mapped entity object
+     */
+    E toEntity(D dto);
+    /**
+     * Maps a collection of entities to a list of DTOs.
+     *
+     * @param entities Collection of entities to be mapped
+     * @return List of mapped DTO objects
+     */
+    default List<D> toDtoList(Collection<E> entities) {
+        if (entities == null) {
+            return List.of();
+        }
+        return entities.stream().map(this::toDto).toList();
+    }
+    /**
+     * Maps a collection of DTOs to a list of entities.
+     *
+     * @param dtos Collection of DTOs to be mapped
+     * @return List of mapped entity objects
+     */
+    default List<E> toEntityList(Collection<D> dtos) {
+        if (dtos == null) {
+            return List.of();
+        }
+        return dtos.stream().map(this::toEntity).toList();
+    }
+    /**
+     * Maps a page of entities to a page of DTOs.
+     *
+     * @param page Page of entities to be mapped
+     * @return Page of mapped DTO objects
+     */
+    default Page<D> toDtoPage(Page<E> page) {
+        if (page == null) {
+            return Page.empty();
+        }
+        List<D> dtos = toDtoList(page.getContent());
+        return new PageImpl<>(dtos, page.getPageable(), page.getTotalElements());
+    }
+    /**
+     * Updates an entity from a DTO.
+     * This method can be overridden to provide custom update logic.
+     *
+     * @param entity Entity to be updated
+     * @param dto    DTO containing update data
+     * @return Updated entity
+     */
+    default E updateEntityFromDto(D dto, E entity) {
+        return entity;
+    }
+}
+
+// src/main/java/com/spacedlearning/repository/ModuleRepository.java
+/**
+ * Repository for Module entity
+ */
+@Repository
+public interface ModuleRepository extends JpaRepository<Module, UUID> {
+	/**
+	 * Count modules by book ID
+	 * 
+	 * @param bookId Book ID
+	 * @return Number of modules
+	 */
+	@Query("SELECT COUNT(m) FROM Module m WHERE m.book.id = :bookId")
+	long countByBookId(@Param("bookId") UUID bookId);
+	/**
+	 * Check if a module with the given number exists for a book
+	 * 
+	 * @param bookId   Book ID
+	 * @param moduleNo Module number
+	 * @return true if exists, false otherwise
+	 */
+	boolean existsByBookIdAndModuleNo(UUID bookId, Integer moduleNo);
+	/**
+	 * Find modules by book ID (paginated)
+	 * 
+	 * @param bookId   Book ID
+	 * @param pageable Pagination information
+	 * @return Page of modules
+	 */
+	Page<Module> findByBookId(UUID bookId, Pageable pageable);
+	/**
+	 * Find module by book ID and module number
+	 * 
+	 * @param bookId   Book ID
+	 * @param moduleNo Module number
+	 * @return Optional containing the module
+	 */
+	Optional<Module> findByBookIdAndModuleNo(UUID bookId, Integer moduleNo);
+	/**
+	 * Find modules by book ID
+	 * 
+	 * @param bookId Book ID
+	 * @return List of modules
+	 */
+	List<Module> findByBookIdOrderByModuleNo(UUID bookId);
+	/**
+	 * Find the latest module number for a book
+	 * 
+	 * @param bookId Book ID
+	 * @return Maximum module number or 0 if no modules
+	 */
+	@Query("SELECT COALESCE(MAX(m.moduleNo), 0) FROM Module m WHERE m.book.id = :bookId")
+	Integer findMaxModuleNoByBookId(@Param("bookId") UUID bookId);
+	/**
+	 * Find module by ID with progress eagerly loaded
+	 * 
+	 * @param id Module ID
+	 * @return Optional containing module with progress
+	 */
+	@EntityGraph(attributePaths = { "progress" })
+	Optional<Module> findWithProgressById(UUID id);
+}
+
+// src/main/java/com/spacedlearning/entity/Book.java
+/**
+ * Entity representing a book in the system.
+ */
+@Entity
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Table(name = "books", schema = "spaced_learning")
+public class Book extends BaseEntity {
+	@NotBlank
+	@Size(max = 100)
+	@Column(name = "name", length = 100, nullable = false)
+	private String name;
+	@Column(name = "description", columnDefinition = "TEXT")
+	private String description;
+	@Enumerated(EnumType.STRING)
+	@Column(name = "status", length = 20)
+	private BookStatus status = BookStatus.DRAFT;
+	@Enumerated(EnumType.STRING)
+	@Column(name = "difficulty_level", length = 20)
+	private DifficultyLevel difficultyLevel;
+	@Size(max = 50)
+	@Column(name = "category", length = 50)
+	private String category;
+	@OneToMany(mappedBy = "book", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
+	private List<Module> modules = new ArrayList<>();
+	/**
+     * Adds a module to this book and sets the bidirectional relationship.
+     *
+     * @param module The module to add
+     * @return The added module
+     */
+    public Module addModule(Module module) {
+        modules.add(module);
+        module.setBook(this);
+        return module;
+    }
+	/**
+     * Removes a module from this book.
+     *
+     * @param module The module to remove
+     * @return True if the module was removed, false otherwise
+     */
+    public boolean removeModule(Module module) {
+        final boolean removed = modules.remove(module);
+        if (removed) {
+            module.setBook(null);
+        }
+        return removed;
+    }
+}
+
+// src/main/java/com/spacedlearning/config/cache/CacheConfig.java
+@Configuration
+@EnableCaching
+public class CacheConfig {
+	private static final String CACHE_MANAGER = "CACHE_MANAGER";
+	private static final String PUBLIC_MODULES_CACHE_MANAGER = "PUBLIC_MODULES_CACHE_MANAGER";
+	private static final String RECENT_MODULES_CACHE_MANAGER = "RECENT_MODULES_CACHE_MANAGER";
+	@Primary
+	@Bean(name = CACHE_MANAGER)
+	CacheManager cacheManager() {
+        final CaffeineCacheManager cacheManager = new CaffeineCacheManager();
+        cacheManager
+            .setCacheNames(
+                Arrays.asList("publicModules", "recentModules", "moduleStatistics", "folders", "vocabularyCounts"));
+        cacheManager.setCaffeine(caffeineCacheBuilder());
+        return cacheManager;
+    }
+    @Bean
+	Caffeine<Object, Object> caffeineCacheBuilder() {
+        return Caffeine.newBuilder().expireAfterWrite(Duration.ofMinutes(30)).maximumSize(1000);
+    }
+    /**
+     * Custom cache configurations can be defined as separate cache managers if
+     * needed
+     */
+	@Bean(name = PUBLIC_MODULES_CACHE_MANAGER)
+	CacheManager publicModulesCacheManager() {
+        final CaffeineCacheManager cacheManager = new CaffeineCacheManager("publicModules");
+        cacheManager.setCaffeine(Caffeine.newBuilder().expireAfterWrite(Duration.ofHours(1)).maximumSize(200));
+        return cacheManager;
+    }
+	@Bean(name = RECENT_MODULES_CACHE_MANAGER)
+	CacheManager recentModulesCacheManager() {
+        final CaffeineCacheManager cacheManager = new CaffeineCacheManager("recentModules");
+        cacheManager.setCaffeine(Caffeine.newBuilder().expireAfterWrite(Duration.ofMinutes(15)).maximumSize(500));
+        return cacheManager;
+    }
+}
+
+// src/main/java/com/spacedlearning/entity/Module.java
+/**
+ * Entity representing a module in a book.
+ */
+@Entity
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Table(name = "modules", schema = "spaced_learning")
+public class Module extends BaseEntity {
+	@NotNull
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "book_id", nullable = false)
+	private Book book;
+	@NotNull
+	@Min(1)
+	@Column(name = "module_no", nullable = false)
+	private Integer moduleNo;
+	@NotBlank
+	@Size(max = 255)
+	@Column(name = "title", length = 255, nullable = false)
+	private String title;
+	@Min(0)
+	@Column(name = "word_count")
+	private Integer wordCount = 0;
+	@OneToMany(mappedBy = "module", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
+	private List<ModuleProgress> progress = new ArrayList<>();
+	/**
+	 * Adds a progress record to this module and sets the bidirectional
+	 * relationship.
+	 *
+	 * @param moduleProgress The progress to add
+	 * @return The added progress
+	 */
+	public ModuleProgress addProgress(ModuleProgress moduleProgress) {
+		progress.add(moduleProgress);
+		moduleProgress.setModule(this);
+		return moduleProgress;
+	}
+	/**
+	 * Removes a progress record from this module.
+	 *
+	 * @param moduleProgress The progress to remove
+	 * @return True if the progress was removed, false otherwise
+	 */
+	public boolean removeProgress(ModuleProgress moduleProgress) {
+		final boolean removed = progress.remove(moduleProgress);
+		if (removed) {
+			moduleProgress.setModule(null);
+		}
+		return removed;
+	}
+}
+
+// src/main/java/com/spacedlearning/service/BookService.java
+/**
+ * Service interface for Book operations
+ */
+public interface BookService {
+	/**
+	 * Create a new book
+	 * 
+	 * @param request Book creation request
+	 * @return Created book detail response
+	 */
+	BookDetailResponse create(BookCreateRequest request);
+	/**
+	 * Delete a book
+	 * 
+	 * @param id Book ID
+	 */
+	void delete(UUID id);
+	/**
+	 * Find all books with pagination
+	 * 
+	 * @param pageable Pagination information
+	 * @return Page of book summaries
+	 */
+	Page<BookSummaryResponse> findAll(Pageable pageable);
+	/**
+	 * Find books with filters
+	 * 
+	 * @param status          Book status
+	 * @param difficultyLevel Difficulty level
+	 * @param category        Category
+	 * @param pageable        Pagination information
+	 * @return Page of book summaries
+	 */
+	Page<BookSummaryResponse> findByFilters(BookStatus status, DifficultyLevel difficultyLevel, String category,
+			Pageable pageable);
+	/**
+	 * Find book by ID
+	 * 
+	 * @param id Book ID
+	 * @return Book detail response
+	 */
+	BookDetailResponse findById(UUID id);
+	/**
+	 * Get all categories
+	 * 
+	 * @return List of unique categories
+	 */
+	List<String> getAllCategories();
+	/**
+	 * Search books by name
+	 * 
+	 * @param searchTerm Search term
+	 * @param pageable   Pagination information
+	 * @return Page of book summaries
+	 */
+	Page<BookSummaryResponse> searchByName(String searchTerm, Pageable pageable);
+	/**
+	 * Update a book
+	 * 
+	 * @param id      Book ID
+	 * @param request Book update request
+	 * @return Updated book detail response
+	 */
+	BookDetailResponse update(UUID id, BookUpdateRequest request);
+}
+
+// src/main/java/com/spacedlearning/service/ModuleService.java
+/**
+ * Service interface for Module operations
+ */
+public interface ModuleService {
+    /**
+     * Create a new module
+     *
+     * @param request Module creation request
+     * @return Created module detail response
+     */
+    ModuleDetailResponse create(ModuleCreateRequest request);
+    /**
+     * Delete a module
+     *
+     * @param id Module ID
+     */
+    void delete(UUID id);
+    /**
+     * Find all modules with pagination
+     *
+     * @param pageable Pagination information
+     * @return Page of module summaries
+     */
+    Page<ModuleSummaryResponse> findAll(Pageable pageable);
+    /**
+     * Find all modules for a book
+     *
+     * @param bookId Book ID
+     * @return List of module summaries
+     */
+	List<ModuleSummaryResponse> findAllByBookId(UUID bookId);
+	/**
+	 * Find modules by book ID
+	 *
+	 * @param bookId   Book ID
+	 * @param pageable Pagination information
+	 * @return Page of module summaries
+	 */
+	Page<ModuleSummaryResponse> findByBookId(UUID bookId, Pageable pageable);
+	/**
+	 * Find module by ID
+	 *
+	 * @param id Module ID
+	 * @return Module detail response
+	 */
+	ModuleDetailResponse findById(UUID id);
+	/**
+	 * Get next module number for a book
+	 * 
+	 * @param bookId Book ID
+	 * @return Next available module number
+	 */
+	Integer getNextModuleNumber(UUID bookId);
+	/**
+	 * Update a module
+	 * 
+	 * @param id      Module ID
+	 * @param request Module update request
+	 * @return Updated module detail response
+	 */
+	ModuleDetailResponse update(UUID id, ModuleUpdateRequest request);
+}
+
+// src/main/java/com/spacedlearning/service/UserService.java
+/**
+ * Service interface for User operations
+ */
+public interface UserService {
+	/**
+	 * Delete a user
+	 * 
+	 * @param id User ID
+	 */
+	void delete(UUID id);
+	/**
+	 * Check if a user exists by email
+	 * 
+	 * @param email User email
+	 * @return true if exists, false otherwise
+	 */
+	boolean existsByEmail(String email);
+	/**
+	 * Find all users with pagination
+	 * 
+	 * @param pageable Pagination information
+	 * @return Page of user detailed responses
+	 */
+	Page<UserDetailedResponse> findAll(Pageable pageable);
+	/**
+	 * Find user by email
+	 * 
+	 * @param email User email
+	 * @return User response
+	 */
+	UserResponse findByEmail(String email);
+	/**
+	 * Find user by ID
+	 * 
+	 * @param id User ID
+	 * @return User detailed response
+	 */
+	UserDetailedResponse findById(UUID id);
+	/**
+	 * Get current authenticated user
+	 * 
+	 * @return User response
+	 */
+	UserResponse getCurrentUser();
+	/**
+	 * Get UserDetails for a user by username (email)
+	 * 
+	 * @param username Username (email)
+	 * @return UserDetails object
+	 */
+	UserDetails loadUserByUsername(String username);
+	/**
+	 * Restore a soft-deleted user
+	 * 
+	 * @param id User ID
+	 * @return Restored user response
+	 */
+	UserResponse restore(UUID id);
+	/**
+	 * Update a user
+	 * 
+	 * @param id      User ID
+	 * @param request User update request
+	 * @return Updated user response
+	 */
+	UserResponse update(UUID id, UserUpdateRequest request);
+}
+
+// src/main/java/com/spacedlearning/entity/BaseEntity.java
+@MappedSuperclass
+@EntityListeners(AuditingEntityListener.class)
+@SQLRestriction("deleted_at IS NULL")
+@Getter
+@Setter
+public abstract class BaseEntity {
+	@Id
+	@GeneratedValue(strategy = GenerationType.UUID)
+	@Column(name = "id", updatable = false)
+	private UUID id;
+	@CreatedDate
+	@Column(name = "created_at", updatable = false)
+	private LocalDateTime createdAt;
+	@LastModifiedDate
+	@Column(name = "updated_at")
+	private LocalDateTime updatedAt;
+	/**
+	 * When this field is set, the entity is considered deleted (soft delete).
+	 * The @SQLRestriction annotation on the class ensures that entities with
+	 * non-null deletedAt will not be returned in normal queries.
+	 */
+	@Column(name = "deleted_at")
+	private LocalDateTime deletedAt;
+	/**
+	 * Check if the entity has been soft deleted
+	 *
+	 * @return true if the entity is deleted (deleted_at is not null)
+	 */
+	public boolean isDeleted() {
+		return deletedAt != null;
+	}
+	/**
+	 * Restore a soft-deleted entity
+	 */
+	public void restore() {
+		deletedAt = null;
+	}
+	/**
+	 * Mark this entity as soft deleted
+	 */
+	public void softDelete() {
+		deletedAt = LocalDateTime.now();
+	}
+}
+
+// src/main/java/com/spacedlearning/security/UserSecurity.java
+/**
+ * Component for user-based security checks
+ */
+@Component("userSecurity")
+@RequiredArgsConstructor
+@Slf4j
+public class UserSecurity {
+	/**
+	 * Checks if the current authenticated user matches the requested user ID
+	 * 
+	 * @param userId User ID to check
+	 * @return true if current user matches the ID, false otherwise
+	 */
+	public boolean isCurrentUser(UUID userId) {
+		final Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+		if (authentication == null || !authentication.isAuthenticated()) {
+			return false;
+		}
+		final Object principal = authentication.getPrincipal();
+		if (principal instanceof final CustomUserDetails userDetails) {
+			return userDetails.getUser().getId().equals(userId);
+		}
+		if (principal instanceof org.springframework.security.core.userdetails.UserDetails) {
+			final String username = ((org.springframework.security.core.userdetails.UserDetails) principal)
+					.getUsername();
+			log.debug("Checking access for user {} against requested ID {}", username, userId);
+			return true; // Allow admins to access (handled by PreAuthorize annotation)
+		}
+		return false;
+	}
+}
+
+// src/main/java/com/spacedlearning/entity/Role.java
+/**
+ * Role entity for authorization.
+ */
+@Entity
+@Table(name = "roles")
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class Role {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    @Column(nullable = false, unique = true, length = 50)
+    private String name;
+    @Column(length = 255)
+    private String description;
+    @ManyToMany(mappedBy = "roles")
+    @Builder.Default
+    private Set<User> users = new HashSet<>();
+    @Override
+    public boolean equals(Object o) {
+        if (this == o)
+            return true;
+        if (!(o instanceof Role))
+            return false;
+        Role role = (Role) o;
+        return id != null && id.equals(role.getId());
+    }
+    @Override
+    public int hashCode() {
+        return id != null ? id.hashCode() : 31;
+    }
+    @Override
+    public String toString() {
+        return "Role{" + "id=" + id + ", name='" + name + '\'' + '}';
+    }
+}
+
+// src/main/java/com/spacedlearning/security/CustomUserDetails.java
+/**
+ * Custom UserDetails implementation that holds a reference to the original User
+ * entity.
+ */
+@Getter
+public class CustomUserDetails extends org.springframework.security.core.userdetails.User {
+    private static final long serialVersionUID = 1L;
+    /**
+     * Determines if the user is active based on their status.
+     *
+     * @param user The user to check
+     * @return true if the user status is ACTIVE, false otherwise
+     */
+    private static boolean isUserActive(User user) {
+        return user != null && UserStatus.ACTIVE.equals(user.getStatus());
+    }
+    private transient User user;
+	/**
+     * Constructs a CustomUserDetails from a User entity
+     *
+     * @param user        The original User entity
+     * @param authorities The authorities granted to the user
+     */
+    public CustomUserDetails(User user, Collection<? extends GrantedAuthority> authorities) {
+        super(
+            user.getEmail(),
+            user.getPassword(),
+            isUserActive(user),
+            true, // accountNonExpired
+            true, // credentialsNonExpired
+            true, // accountNonLocked
+            authorities);
+        this.user = user;
+    }
+}
+
+// src/main/java/com/spacedlearning/entity/Repetition.java
+/**
+ * Entity representing a repetition record for spaced learning.
+ */
+@Entity
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Table(name = "repetitions", schema = "spaced_learning")
+public class Repetition extends BaseEntity {
+	@NotNull
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "module_progress_id", nullable = false)
+	private ModuleProgress moduleProgress;
+	@NotNull
+	@Enumerated(EnumType.STRING)
+	@Column(name = "repetition_order", length = 20, nullable = false)
+	private RepetitionOrder repetitionOrder;
+	@Enumerated(EnumType.STRING)
+	@Column(name = "status", length = 50)
+	private RepetitionStatus status = RepetitionStatus.NOT_STARTED;
+	@Column(name = "review_date")
+	private LocalDate reviewDate;
+}
+
+// src/main/java/com/spacedlearning/config/WebConfig.java
+/**
+ * Web configuration for the application.
+ */
+@Configuration
+public class WebConfig implements WebMvcConfigurer {
+	/**
+	 * Configure Cross-Origin Resource Sharing (CORS).
+	 */
+	@Override
+	public void addCorsMappings(@NonNull CorsRegistry registry) {
+		registry.addMapping("/api/**").allowedOrigins("http://localhost:3000") // Frontend URL in development
+				.allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS").allowedHeaders("*")
+				.exposedHeaders("Authorization").allowCredentials(true).maxAge(3600); // 1 hour
+	}
+    /**
+     * Configure locale resolver for internationalization.
+     */
+    @Bean
+    LocaleResolver localeResolver() {
+		final AcceptHeaderLocaleResolver localeResolver = new AcceptHeaderLocaleResolver();
+		localeResolver.setDefaultLocale(Locale.US);
+		return localeResolver;
+	}
+}
+
+// src/main/java/com/spacedlearning/service/AuthService.java
+/**
+ * Service interface for Authentication operations
+ */
+public interface AuthService {
+	/**
+	 * Authenticate a user
+	 * 
+	 * @param request Auth request
+	 * @return Auth response
+	 */
+	AuthResponse authenticate(AuthRequest request);
+	/**
+	 * Extract username from token
+	 * 
+	 * @param token JWT token
+	 * @return Username
+	 */
+	String getUsernameFromToken(String token);
+	/**
+	 * Refresh an authentication token
+	 * 
+	 * @param request Refresh token request
+	 * @return Auth response
+	 */
+	AuthResponse refreshToken(RefreshTokenRequest request);
+	/**
+	 * Register a new user
+	 * 
+	 * @param request Register request
+	 * @return User response
+	 */
+	UserResponse register(RegisterRequest request);
+	/**
+	 * Validate an authentication token
+	 * 
+	 * @param token JWT token
+	 * @return true if valid, false otherwise
+	 */
+	boolean validateToken(String token);
+}
+
+// src/main/java/com/spacedlearning/config/swagger/SwaggerConfig.java
+/**
+ * Minimal Swagger/OpenAPI configuration for API documentation. Most
+ * configuration is handled via application.properties using springdoc.*
+ * properties.
+ */
+@Configuration
+public class SwaggerConfig {
+    /**
+     * Creates a minimal OpenAPI bean for Swagger documentation with JWT security.
+     * The rest of configuration (title, description, etc.) is in
+     * application.properties.
+     */
+    @Bean
+    OpenAPI openAPI() {
+		final String securitySchemeName = "bearerAuth";
+		return new OpenAPI().addSecurityItem(new SecurityRequirement().addList(securitySchemeName))
+				.components(new Components().addSecuritySchemes(securitySchemeName, new SecurityScheme()
+						.name(securitySchemeName).type(SecurityScheme.Type.HTTP).scheme("bearer").bearerFormat("JWT")));
+	}
+}
+
+// src/main/java/com/spacedlearning/repository/UserRepository.java
+/**
+ * Repository for User entity.
+ */
+@Repository
+public interface UserRepository extends JpaRepository<User, UUID> {
+	/**
+	 * Checks if a user exists with the given email.
+	 *
+	 * @param email The email to check
+	 * @return true if a user exists, false otherwise
+	 */
+	boolean existsByEmail(String email);
+	/**
+	 * Finds a user by email.
+	 *
+	 * @param email The email to search for
+	 * @return An Optional containing the user if found
+	 */
+	Optional<User> findByEmail(String email);
+	/**
+	 * Finds a user by email, including roles, with a single query. Uses a custom
+	 * query to avoid N+1 issues.
+	 *
+	 * @param email The email to search for
+	 * @return An Optional containing the user if found
+	 */
+	@Query("SELECT u FROM User u LEFT JOIN FETCH u.roles WHERE u.email = :email")
+	Optional<User> findByEmailWithRoles(String email);
+}
+
+// src/main/java/com/spacedlearning/dto/progress/ModuleProgressCreateRequest.java
+/**
+ * DTO for creating module progress
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ModuleProgressCreateRequest {
+	@NotNull(message = "Module ID is required")
+	private UUID moduleId;
+	@NotNull(message = "User ID is required")
+	private UUID userId;
+	private LocalDate firstLearningDate;
+	private CycleStudied cyclesStudied;
+	private LocalDate nextStudyDate;
+	@DecimalMin(value = "0.00", message = "Percent complete cannot be negative")
+	@DecimalMax(value = "100.00", message = "Percent complete cannot exceed 100")
+	private BigDecimal percentComplete;
+}
+
+// src/main/java/com/spacedlearning/dto/progress/ModuleProgressDetailResponse.java
+/**
+ * DTO for detailed module progress response including repetitions
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ModuleProgressDetailResponse {
+	private UUID id;
+	private UUID moduleId;
+	private String moduleTitle;
+	private UUID userId;
+	private String userName;
+	private LocalDate firstLearningDate;
+	private CycleStudied cyclesStudied;
+	private LocalDate nextStudyDate;
+	private BigDecimal percentComplete;
+	private LocalDateTime createdAt;
+	private LocalDateTime updatedAt;
+	private List<RepetitionResponse> repetitions;
+}
+
+// src/main/java/com/spacedlearning/dto/module/ModuleCreateRequest.java
+/**
+ * DTO for creating a new module
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ModuleCreateRequest {
+	@NotNull(message = "Book ID is required")
+	private UUID bookId;
+	@NotNull(message = "Module number is required")
+	@Min(value = 1, message = "Module number must be at least 1")
+	private Integer moduleNo;
+	@NotBlank(message = "Title is required")
+	@Size(max = 255, message = "Title must not exceed 255 characters")
+	private String title;
+	@Min(value = 0, message = "Word count cannot be negative")
+	private Integer wordCount;
+}
+
+// src/main/java/com/spacedlearning/config/mapper/MapperConfig.java
+/**
+ * Configuration class for all mappers in the application.
+ * Centralizes mapper configuration and provides utility beans.
+ */
+@Configuration
+public class MapperConfig {
+    /**
+     * Creates a map of UUID to Integer for module counts.
+     * This utility bean helps with processing folders and their module counts.
+     *
+     * @return A function that creates a map from (UUID, Integer) pairs
+     */
+    @Bean
+    Function<List<Object[]>, Map<UUID, Integer>> moduleCountMapFunction() {
+        return results -> results
+            .stream()
+            .collect(Collectors.toMap(row -> (UUID) row[0], row -> ((Number) row[1]).intValue(), (a, b) -> a));
+    }
+}
+
+// src/main/java/com/spacedlearning/config/message/MessageSourceConfig.java
+@Configuration
+public class MessageSourceConfig {
+    @Bean
+    MessageSource messageSource() {
+        ReloadableResourceBundleMessageSource messageSource = new ReloadableResourceBundleMessageSource();
+        messageSource.setBasename("classpath:messages");
+        messageSource.setDefaultEncoding("UTF-8");
+        return messageSource;
+    }
+    @Bean
+    LocalValidatorFactoryBean getValidator() {
+        LocalValidatorFactoryBean bean = new LocalValidatorFactoryBean();
+        bean.setValidationMessageSource(messageSource());
+        return bean;
+    }
+}
+
+// src/main/java/com/spacedlearning/dto/progress/ModuleProgressSummaryResponse.java
+/**
+ * DTO for summarized module progress response (without repetitions)
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ModuleProgressSummaryResponse {
+    private UUID id;
+    private UUID moduleId;
+    private UUID userId;
+    private LocalDate firstLearningDate;
+    private CycleStudied cyclesStudied;
+    private LocalDate nextStudyDate;
+    private BigDecimal percentComplete;
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
+	private int repetitionCount;
+}
+
+// src/main/java/com/spacedlearning/dto/progress/ModuleProgressUpdateRequest.java
+/**
+ * DTO for updating module progress
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ModuleProgressUpdateRequest {
+	private LocalDate firstLearningDate;
+	private CycleStudied cyclesStudied;
+	private LocalDate nextStudyDate;
+	@DecimalMin(value = "0.00", message = "Percent complete cannot be negative")
+	@DecimalMax(value = "100.00", message = "Percent complete cannot exceed 100")
+	private BigDecimal percentComplete;
+}
+
+// src/main/java/com/spacedlearning/dto/book/BookDetailResponse.java
+/**
+ * DTO for detailed book response including modules
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class BookDetailResponse {
+	private UUID id;
+	private String name;
+	private String description;
+	private BookStatus status;
+	private DifficultyLevel difficultyLevel;
+	private String category;
+	private LocalDateTime createdAt;
+	private LocalDateTime updatedAt;
+	private List<ModuleDetailResponse> modules;
+}
+
+// src/main/java/com/spacedlearning/dto/book/BookCreateRequest.java
+/**
+ * DTO for creating a new book
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class BookCreateRequest {
+	@NotBlank(message = "Book name is required")
+	@Size(max = 100, message = "Book name must not exceed 100 characters")
+	private String name;
+	private String description;
+	private BookStatus status;
+	private DifficultyLevel difficultyLevel;
+	@Size(max = 50, message = "Category must not exceed 50 characters")
+	private String category;
+}
+
+// src/main/java/com/spacedlearning/dto/repetition/RepetitionCreateRequest.java
+/**
+ * DTO for creating repetition
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class RepetitionCreateRequest {
+	@NotNull(message = "Module progress ID is required")
+	private UUID moduleProgressId;
+	@NotNull(message = "Repetition order is required")
+	private RepetitionOrder repetitionOrder;
+	private RepetitionStatus status;
+	private LocalDate reviewDate;
+}
+
+// src/main/java/com/spacedlearning/dto/auth/RegisterRequest.java
+/**
+ * DTO for user registration
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class RegisterRequest {
+	@NotBlank(message = "Email is required")
+	@Email(message = "Invalid email format")
+	private String email;
+	@NotBlank(message = "Password is required")
+	@Size(min = 8, message = "Password must be at least 8 characters long")
+	private String password;
+	@NotBlank(message = "First name is required")
+	private String firstName;
+	@NotBlank(message = "Last name is required")
+	private String lastName;
+}
+
+// src/main/java/com/spacedlearning/dto/book/BookUpdateRequest.java
+/**
+ * DTO for updating an existing book
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class BookUpdateRequest {
+	@Size(max = 100, message = "Book name must not exceed 100 characters")
+	private String name;
+	private String description;
+	private BookStatus status;
+	private DifficultyLevel difficultyLevel;
+	@Size(max = 50, message = "Category must not exceed 50 characters")
+	private String category;
+}
+
+// src/main/java/com/spacedlearning/dto/module/ModuleDetailResponse.java
+/**
+ * DTO for detailed module response including progress
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ModuleDetailResponse {
+	private UUID id;
+	private UUID bookId;
+	private String bookName;
+	private Integer moduleNo;
+	private String title;
+	private Integer wordCount;
+	private LocalDateTime createdAt;
+	private LocalDateTime updatedAt;
+	private List<ModuleProgressSummaryResponse> progress;
+}
+
+// src/main/java/com/spacedlearning/exception/ApiError.java
+/**
+ * Standard error response structure for the API.
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public class ApiError {
+	@JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd HH:mm:ss")
+	private LocalDateTime timestamp;
+	private int status;
+	private String error;
+	private String message;
+	private String path;
+	/**
+	 * Detailed field-level errors when applicable
+	 */
+	private Map<String, String> errors;
+}
+
+// src/main/java/com/spacedlearning/dto/repetition/RepetitionResponse.java
+/**
+ * DTO for repetition response
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class RepetitionResponse {
+	private UUID id;
+	private UUID moduleProgressId;
+	private RepetitionOrder repetitionOrder;
+	private RepetitionStatus status;
+	private LocalDate reviewDate;
+	private LocalDateTime createdAt;
+	private LocalDateTime updatedAt;
+}
+
+// src/main/java/com/spacedlearning/dto/book/BookSummaryResponse.java
+/**
+ * DTO for summarized book response (without modules)
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class BookSummaryResponse {
+	private UUID id;
+	private String name;
+	private BookStatus status;
+	private DifficultyLevel difficultyLevel;
+	private String category;
+	private LocalDateTime createdAt;
+	private LocalDateTime updatedAt;
+	private int moduleCount;
+}
+
+// src/main/java/com/spacedlearning/dto/module/ModuleUpdateRequest.java
+/**
+ * DTO for updating an existing module
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ModuleUpdateRequest {
+	@Min(value = 1, message = "Module number must be at least 1")
+	private Integer moduleNo;
+	@Size(max = 255, message = "Title must not exceed 255 characters")
+	private String title;
+	@Min(value = 0, message = "Word count cannot be negative")
+	private Integer wordCount;
+}
+
+// src/main/java/com/spacedlearning/repository/RoleRepository.java
+/**
+ * Repository for Role entity.
+ */
+@Repository
+public interface RoleRepository extends JpaRepository<Role, Long> {
+	/**
+	 * Checks if a role exists with the given name.
+	 *
+	 * @param name The role name
+	 * @return true if a role exists, false otherwise
+	 */
+	boolean existsByName(String name);
+	/**
+	 * Finds a role by name.
+	 *
+	 * @param name The role name
+	 * @return An Optional containing the role if found
+	 */
+	Optional<Role> findByName(String name);
+}
+
+// src/main/java/com/spacedlearning/dto/module/ModuleSummaryResponse.java
+/**
+ * DTO for summarized module response (without progress)
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ModuleSummaryResponse {
+	private UUID id;
+	private UUID bookId;
+	private Integer moduleNo;
+	private String title;
+	private Integer wordCount;
+	private LocalDateTime createdAt;
+	private LocalDateTime updatedAt;
+}
+
+// src/main/java/com/spacedlearning/dto/auth/AuthRequest.java
+/**
+ * DTO for user authentication request
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class AuthRequest {
+	@NotBlank(message = "Email is required")
+	@Email(message = "Invalid email format")
+	private String email;
+	@NotBlank(message = "Password is required")
+	private String password;
+}
+
+// src/main/java/com/spacedlearning/dto/user/UserResponse.java
+/**
+ * DTO for user response (public data)
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class UserResponse {
+	private UUID id;
+	private String email;
+	private String firstName;
+	private String lastName;
+	private String displayName;
+	private LocalDateTime createdAt;
+	private List<String> roles;
+}
+
+// src/main/java/com/spacedlearning/dto/common/ErrorResponse.java
+/**
+ * Error response with message and error details
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ErrorResponse {
+	public static ErrorResponse of(String message, String error, Integer status) {
+		return ErrorResponse.builder().message(message).error(error).status(status).build();
+	}
+	private String message;
+	private String error;
+	private Integer status;
+}
+
+// src/main/java/com/spacedlearning/dto/repetition/RepetitionUpdateRequest.java
+/**
+ * DTO for updating repetition
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class RepetitionUpdateRequest {
+	private RepetitionStatus status;
+	private LocalDate reviewDate;
+}
+
+// src/main/java/com/spacedlearning/dto/user/UserDetailedResponse.java
+/**
+ * DTO for detailed user response (admin view)
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class UserDetailedResponse {
+	private UUID id;
+	private String email;
+	private String displayName;
+	private LocalDateTime createdAt;
+	private LocalDateTime updatedAt;
+	private LocalDateTime deletedAt;
+}
+
+// src/main/java/com/spacedlearning/dto/common/PageResponse.java
+/**
+ * Paginated response wrapper
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class PageResponse<T> {
+	private List<T> content;
+	private Integer page;
+	private Integer size;
+	private Long totalElements;
+	private Integer totalPages;
+	private Boolean first;
+	private Boolean last;
+}
+
+// src/main/java/com/spacedlearning/dto/common/SuccessResponse.java
+/**
+ * Generic success response with a message
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class SuccessResponse {
+	public static SuccessResponse of(String message) {
+		return SuccessResponse.builder().message(message).success(true).build();
+	}
+	private String message;
+	private Boolean success;
+}
+
+// src/main/java/com/spacedlearning/dto/auth/AuthResponse.java
+/**
+ * DTO for authentication response containing JWT token and user information
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class AuthResponse {
+	private String token;
+	private String refreshToken;
+	private UserResponse user;
+}
+
+// src/main/java/com/spacedlearning/entity/enums/RepetitionOrder.java
+/**
+ * Enum representing the order of repetition.
+ */
+public enum RepetitionOrder {
+	FIRST_REPETITION("1st repetition"), SECOND_REPETITION("2nd repetition"), THIRD_REPETITION("3rd repetition"),
+	FOURTH_REPETITION("4th repetition"), FIFTH_REPETITION("5th repetition");
+	private final String value;
+	RepetitionOrder(String value) {
+		this.value = value;
+	}
+	public String getValue() {
+		return value;
+	}
+}
+
+// src/main/java/com/spacedlearning/dto/user/UserUpdateRequest.java
+/**
+ * DTO for updating a user
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class UserUpdateRequest {
+	private String displayName;
+	@Size(min = 8, message = "Password must be at least 8 characters long")
+	private String password;
+}
+
+// src/main/java/com/spacedlearning/dto/common/DataResponse.java
+/**
+ * Generic data response
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class DataResponse<T> {
+	private T data;
+	private Boolean success;
+	public static <T> DataResponse<T> of(T data) {
+		return DataResponse.<T>builder().data(data).success(true).build();
+	}
+}
+
+// src/main/java/com/spacedlearning/entity/enums/CycleStudied.java
+/**
+ * Enum representing the cycles studied status.
+ */
+public enum CycleStudied {
+	FIRST_TIME("FIRST_TIME"), FIRST_REVIEW("FIRST_REVIEW"), SECOND_REVIEW("SECOND_REVIEW"),
+	THIRD_REVIEW("THIRD_REVIEW"), MORE_THAN_THREE_REVIEWS("MORE_THAN_THREE_REVIEWS");
+	private final String value;
+	CycleStudied(String value) {
+		this.value = value;
+	}
+	public String getValue() {
+		return value;
+	}
+}
+
+// src/main/java/com/spacedlearning/dto/common/ValidationErrorResponse.java
+/**
+ * Validation error response with field errors
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ValidationErrorResponse {
+	private String message;
+	private List<FieldError> errors;
+	private Integer status;
+}
+
+// src/main/java/com/spacedlearning/dto/auth/RefreshTokenRequest.java
+/**
+ * DTO for refresh token request
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class RefreshTokenRequest {
+	@NotBlank(message = "Refresh token is required")
+	private String refreshToken;
+}
+
+// src/main/java/com/spacedlearning/entity/enums/DifficultyLevel.java
+/**
+ * Enum representing possible difficulty levels.
+ */
+public enum DifficultyLevel {
+	BEGINNER("BEGINNER"), INTERMEDIATE("INTERMEDIATE"), ADVANCED("ADVANCED"), EXPERT("EXPERT");
+	private final String value;
+	DifficultyLevel(String value) {
+		this.value = value;
+	}
+	public String getValue() {
+		return value;
+	}
+}
+
+// src/main/java/com/spacedlearning/config/database/JpaAuditingConfig.java
+@Configuration
+@EnableJpaAuditing
+public class JpaAuditingConfig {
+}
+
+// src/main/java/com/spacedlearning/entity/enums/RepetitionStatus.java
+/**
+ * Enum representing the status of repetition.
+ */
+public enum RepetitionStatus {
+	NOT_STARTED("NOT_STARTED"), COMPLETED("COMPLETED"), SKIPPED("SKIPPED");
+	private final String value;
+	RepetitionStatus(String value) {
+		this.value = value;
+	}
+	public String getValue() {
+		return value;
+	}
+}
+
+// src/main/java/com/spacedlearning/dto/common/FieldError.java
+/**
+ * Field error for validation responses
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class FieldError {
+	private String field;
+	private String message;
+}
+
+// src/main/java/com/spacedlearning/entity/enums/UserStatus.java
+/**
+ * Enum representing possible user statuses.
+ */
+public enum UserStatus {
+	ACTIVE("ACTIVE"), INACTIVE("INACTIVE"), SUSPENDED("SUSPENDED");
+	private final String value;
+	UserStatus(String value) {
+		this.value = value;
+	}
+	public String getValue() {
+		return value;
+	}
+}
+
+// src/main/java/com/spacedlearning/entity/enums/BookStatus.java
+/**
+ * Enum representing possible book statuses.
+ */
+public enum BookStatus {
+	PUBLISHED("PUBLISHED"), DRAFT("DRAFT"), ARCHIVED("ARCHIVED");
+	private final String value;
+	BookStatus(String value) {
+		this.value = value;
+	}
+	public String getValue() {
+		return value;
+	}
+}
+
+// src/main/java/com/spacedlearning/SpacedLearningApiApplication.java
+@SpringBootApplication
+public class SpacedLearningApiApplication {
+	public static void main(String[] args) {
+		SpringApplication.run(SpacedLearningApiApplication.class, args);
+	}
+}
+
+// src/main/java/com/spacedlearning/config/retry/RetryConfig.java
+@Configuration
+@EnableRetry
+public class RetryConfig {
+}
+
+// src/test/java/com/spacedlearning/SpacedLearningApiApplicationTests.java
+@SpringBootTest
+class SpacedLearningApiApplicationTests {
+	@Test
+	void contextLoads() {
+	}
+}
+
+// src/main/resources/application-dev.properties
+spring.application.name=spaced-learning-api
+spring.datasource.url=jdbc:postgresql://localhost:5432/spaced_learning
+spring.datasource.username=postgres
+spring.datasource.password=abcd1234
+spring.datasource.driver-class-name=org.postgresql.Driver
+spring.datasource.hikari.maximum-pool-size=10
+spring.datasource.hikari.minimum-idle=5
+spring.datasource.hikari.idle-timeout=30000
+spring.datasource.hikari.max-lifetime=1800000
+spring.datasource.hikari.pool-name=kardio-hikari-pool
+spring.datasource.hikari.leak-detection-threshold=60000
+spring.web.cors.allowed-origins=https://kardio.com,https://admin.kardio.com
+spring.web.cors.allowed-methods=GET,POST,PUT,DELETE,OPTIONS
+spring.web.cors.allowed-headers=Authorization,Content-Type,X-Requested-With
+spring.web.cors.max-age=3600
+spring.web.cors.allow-credentials=true
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.format_sql=true
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
+spring.jpa.open-in-view=false
+spring.jpa.properties.hibernate.jdbc.batch_size=50
+spring.jpa.properties.hibernate.order_inserts=true
+spring.jpa.properties.hibernate.order_updates=true
+spring.jpa.properties.hibernate.jdbc.batch_versioned_data=true
+spring.jpa.properties.hibernate.query.in_clause_parameter_padding=true
+spring.jpa.properties.hibernate.query.fail_on_pagination_over_collection_fetch=true
+logging.level.root=INFO
+logging.level.com.spacedlearning=DEBUG
+logging.level.org.springframework.web=INFO
+logging.level.org.hibernate.SQL=DEBUG
+logging.level.org.hibernate.type.descriptor.sql.BasicBinder=TRACE
+server.port=8080
+server.servlet.context-path=/
+server.error.include-message=always
+server.error.include-binding-errors=always
+jwt.secret=very_long_and_secure_jwt_secret_key_used_for_signing_tokens_in_development
+jwt.expiration=86400000
+jwt.refresh.expiration=604800000
+jwt.issuer=spaced-learning-api
+springdoc.api-docs.path=/v3/api-docs
+springdoc.swagger-ui.path=/swagger-ui.html
+springdoc.swagger-ui.operationsSorter=method
+springdoc.swagger-ui.tagsSorter=alpha
+springdoc.swagger-ui.tryItOutEnabled=true
+springdoc.api-docs.enabled=true
+springdoc.swagger-ui.enabled=true
+springdoc.packagesToScan=com.spacedlearning.controller
+springdoc.pathsToMatch=/api/**
+management.endpoints.web.exposure.include=health,info
+management.endpoint.health.show-details=always
+
+// src/main/resources/messages.properties
+app.name=Spaced Learning API
+app.welcome=Welcome to Spaced Learning API
+resource.book=Book
+resource.module=Module
+resource.moduleProgress=Module Progress
+resource.repetition=Repetition
+resource.user=User
+resource.role=Role
+resource.repetition.withProgressAndOrder=Repetition for ModuleProgress {0}
+error.resource.notfound={0} not found with id: {1}
+error.resource.alreadyexists={0} already exists with {1}: {2}
+error.validation.general=Validation failed
+error.validation.typeMismatch=Parameter {0} should be of type {1}
+error.validation.missingParameter=Required parameter {0} is missing
+error.auth.invalidCredentials=Invalid username or password
+error.auth.accountDisabled=Account is disabled
+error.auth.invalidToken=Invalid or expired token
+error.auth.accessDenied=Access denied: insufficient permissions
+error.server.internal=An unexpected error occurred
+error.database.constraint=A database constraint was violated
+error.module.duplicate.number=Module with number {0} already exists for this book
+success.resource.created={0} created successfully
+success.resource.updated={0} updated successfully
+success.resource.deleted={0} deleted successfully
+success.auth.registered=User registered successfully
+success.auth.loggedIn=Login successful
+success.auth.loggedOut=Logout successful
+pagination.next=Next page
+pagination.previous=Previous page
+pagination.first=First page
+pagination.last=Last page
+
+// src/main/resources/application-prod.properties
+spring.application.name=spaced-learning-api
+spring.datasource.url=${JDBC_DATABASE_URL}
+spring.datasource.username=${JDBC_DATABASE_USERNAME}
+spring.datasource.password=${JDBC_DATABASE_PASSWORD}
+spring.datasource.hikari.maximum-pool-size=20
+spring.datasource.hikari.minimum-idle=10
+spring.datasource.hikari.idle-timeout=30000
+spring.jpa.hibernate.ddl-auto=validate
+spring.jpa.show-sql=false
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
+spring.jpa.open-in-view=false
+logging.level.root=WARN
+logging.level.com.spacedlearning=INFO
+logging.level.org.springframework.web=WARN
+server.port=${PORT:8080}
+server.servlet.context-path=/
+server.error.include-message=never
+server.error.include-binding-errors=never
+jwt.secret=${JWT_SECRET}
+jwt.expiration=${JWT_EXPIRATION:86400000}
+jwt.refresh.expiration=${JWT_REFRESH_EXPIRATION:604800000}
+jwt.issuer=spaced-learning-api
+springdoc.api-docs.enabled=false
+springdoc.swagger-ui.enabled=false
+management.endpoints.web.exposure.include=health
+management.endpoint.health.show-details=never
+
+// src/main/resources/application.properties
+spring.profiles.active=dev
+

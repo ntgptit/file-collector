@@ -1,7 +1,7 @@
-// src/main/java/com/example/filehandler/factory/FileWriterStrategyFactory.java
 package com.example.filehandler.factory;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,7 +18,6 @@ import com.example.filehandler.strategy.TypeScriptFileWriterStrategy;
  */
 public class FileWriterStrategyFactory {
     private static final Logger logger = LoggerFactory.getLogger(FileWriterStrategyFactory.class);
-
     private final List<String> folderPaths;
 
     /**
@@ -27,6 +26,9 @@ public class FileWriterStrategyFactory {
      * @param folderPaths list of folder paths to pass to strategies
      */
     public FileWriterStrategyFactory(List<String> folderPaths) {
+        if (folderPaths == null) {
+            throw new IllegalArgumentException("Folder paths cannot be null");
+        }
         this.folderPaths = folderPaths;
     }
 
@@ -34,20 +36,24 @@ public class FileWriterStrategyFactory {
      * Creates a FileWriterStrategy for the specified file type.
      *
      * @param fileType the type of file to process
-     * @return the appropriate FileWriterStrategy or null if not supported
+     * @return Optional containing the appropriate FileWriterStrategy or empty if not supported
      */
-    public FileWriterStrategy createStrategy(String fileType) {
+    public Optional<FileWriterStrategy> createStrategy(String fileType) {
+        if ((fileType == null) || fileType.trim().isEmpty()) {
+            logger.warn("File type cannot be null or empty");
+            return Optional.empty();
+        }
+
         return switch (fileType.toLowerCase()) {
-            case "java" -> new JavaFileWriterStrategy(this.folderPaths);
-            case "typescript" -> new TypeScriptFileWriterStrategy(this.folderPaths);
-            case "properties" -> new PropertiesFileWriterStrategy(this.folderPaths);
-            case "dart" -> new DartFileWriterStrategy(this.folderPaths);
-            case "kotlin" -> new KotlinFileWriterStrategy(this.folderPaths);
-            default -> {
-                logger.warn("Unsupported file type: {}", fileType);
-                yield null;
-            }
+        case "java" -> Optional.of(new JavaFileWriterStrategy(this.folderPaths));
+        case "typescript" -> Optional.of(new TypeScriptFileWriterStrategy(this.folderPaths));
+        case "properties" -> Optional.of(new PropertiesFileWriterStrategy(this.folderPaths));
+        case "dart" -> Optional.of(new DartFileWriterStrategy(this.folderPaths));
+        case "kotlin" -> Optional.of(new KotlinFileWriterStrategy(this.folderPaths));
+        default -> {
+            logger.warn("Unsupported file type: {}", fileType);
+            yield Optional.empty();
+        }
         };
     }
-
 }
